@@ -196,7 +196,7 @@ const brain=(()=>{let users=new Map(),blocks=[];return{
 };})();
 
 /* ─── SVG FLOOR PLAN COMPONENT ─── */
-const FloorPlan = ({ userPos, route, blockades, congestion, onClick, people, hoveredRoom, setHoveredRoom }) => {
+const FloorPlan = ({ userPos, userHeading, route, blockades, congestion, onClick, people, hoveredRoom, setHoveredRoom }) => {
   const rp = route ? route.map(id => NM[id]).filter(Boolean) : [];
   
   // Convert wall segments to SVG space
@@ -282,15 +282,23 @@ const FloorPlan = ({ userPos, route, blockades, congestion, onClick, people, hov
         {rp.slice(1, -1).map((p, i) => <circle key={`r${i}`} cx={p.x} cy={p.y} r="2.5" fill="#00ffaa" opacity=".5"/>)}
       </g>}
 
-      {/* User position */}
-      {userPos && <g filter="url(#gs)">
+      {/* User position (Original, doesn't work with task 4) */}
+      {/* {userPos && <g filter="url(#gs)">
         <circle cx={userPos.x} cy={userPos.y} r="16" fill="#00aaff08" stroke="#00aaff" strokeWidth=".8">
           <animate attributeName="r" values="12;22;12" dur="2s" repeatCount="indefinite"/>
           <animate attributeName="opacity" values=".6;.12;.6" dur="2s" repeatCount="indefinite"/>
         </circle>
         <circle cx={userPos.x} cy={userPos.y} r="6" fill="#00ccff"/>
         <circle cx={userPos.x} cy={userPos.y} r="2.5" fill="#fff"/>
-      </g>}
+      </g>} */}
+
+      {/* user position - hopefully with arrow + map rotation according to gyroscope? */}
+      {userPos && (
+        <g transform={`translate(${userPos.x}, ${userPos.y}) rotate(${userHeading || 0})`}>
+          <circle r="16" fill="#00aaff08" stroke="#00aaff" strokeWidth=".8" />
+          <path d="M0 -12 L7 6 L0 2 L-7 6 Z" fill="#00ccff" /> 
+        </g>
+      )}
 
       {/* Destination */}
       {route && rp.length > 0 && <g filter="url(#gl)">
@@ -311,6 +319,7 @@ const FloorPlan = ({ userPos, route, blockades, congestion, onClick, people, hov
 export default function App() {
   const [status, setStatus] = useState("STANDBY");
   const [uPos, setUPos] = useState(null);
+  const [uHeading, setUHeading] = useState(0); // Add this!
   const [uNode, setUNode] = useState(null);
   const [route, setRoute] = useState(null);
   const [wifi, setWifi] = useState(true);
@@ -422,19 +431,19 @@ export default function App() {
   }, [doEvac, doBlock, clearAll, doSafe, log]);
 
   // Evacuation step timer
-  useEffect(() => {
-    if (status !== "EVACUATING" || !route || route.length < 2) return;
-    const iv = setInterval(() => {
-      setProg(p => {
-        const n = p + 1;
-        if (n >= route.length - 1) { clearInterval(iv); doSafe(); return p; }
-        const nn = NM[route[n]]; if (nn) { setUPos({ x: nn.x, y: nn.y }); setUNode(route[n]); }
-        if (n === Math.floor(route.length / 2)) speak("Halfway there.");
-        return n;
-      });
-    }, 1800);
-    return () => clearInterval(iv);
-  }, [status, route]);
+  // useEffect(() => {
+  //   if (status !== "EVACUATING" || !route || route.length < 2) return;
+  //   const iv = setInterval(() => {
+  //     setProg(p => {
+  //       const n = p + 1;
+  //       if (n >= route.length - 1) { clearInterval(iv); doSafe(); return p; }
+  //       const nn = NM[route[n]]; if (nn) { setUPos({ x: nn.x, y: nn.y }); setUNode(route[n]); }
+  //       if (n === Math.floor(route.length / 2)) speak("Halfway there.");
+  //       return n;
+  //     });
+  //   }, 1800);
+  //   return () => clearInterval(iv);
+  // }, [status, route]);
 
   // Room search
   const filteredRooms = searchQuery
@@ -442,6 +451,44 @@ export default function App() {
     : [];
 
   const sc = status === "EVACUATING" ? "#ff4444" : status === "SAFE" ? "#00ff88" : "#00aaff";
+
+// task 4: real-time geolocation
+useEffect(() => {
+  if (status !== "EVACUATING") return;
+  const watchId = navigator.geolocation.watchPosition(
+    (position) => {
+      const { latitude, longitude } = position.coords;
+      const mapX = (longitude - (-80.5447)) * 100000; 
+      const mapY = (latitude - 43.4723) * 100000;
+
+      setUPos({ x: mapX, y: mapY });
+    },
+    (err) => console.error("GPS Error:", err),
+    { enableHighAccuracy: true }
+  );
+  // Gyroscope
+  const handleOrientation = (e) => {
+    const compass = e.webkitCompassHeading || Math.abs(e.alpha - 360);
+    setUHeading(compass);
+  };
+  // Check for iOS permission requirements
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(response => {
+        if (response === 'granted') {
+          window.addEventListener('deviceorientation', handleOrientation);
+        }
+      })
+      .catch(console.error);
+  } else { // Non-iOS devices
+    window.addEventListener('deviceorientation', handleOrientation);
+  }
+  return () => {
+    navigator.geolocation.clearWatch(watchId);
+    window.removeEventListener('deviceorientation', handleOrientation);
+  };
+}, [status]);
+
 
   return (
     <div style={{ minHeight: "100vh", background: "#060a10", color: "#c0d0e0", fontFamily: "'IBM Plex Sans',sans-serif" }}>
@@ -474,7 +521,7 @@ export default function App() {
       <div style={{ padding: "14px 20px", maxWidth: 1600, margin: "0 auto" }}>
         {/* MAP */}
         <div style={{ background: "#0a0e17", border: "1px solid #1a2a40", borderRadius: 12, padding: 12, marginBottom: 14 }}>
-          <FloorPlan userPos={uPos} route={route} blockades={blocks} congestion={cong} onClick={onNode} people={people} hoveredRoom={hoveredRoom} setHoveredRoom={setHoveredRoom} />
+          <FloorPlan userPos={uPos} route={route} userHeading={uHeading} blockades={blocks} congestion={cong} onClick={onNode} people={people} hoveredRoom={hoveredRoom} setHoveredRoom={setHoveredRoom} />
           {route && <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <span style={{ color: "#556677", fontSize: 11, fontFamily: "monospace" }}>Evacuation Progress</span>
