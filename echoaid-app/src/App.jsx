@@ -863,12 +863,12 @@ useEffect(() => {
     (err) => console.error("GPS Error:", err),
     { enableHighAccuracy: true }
   );
-  // Gyroscope
+  // gyroscope
   const handleOrientation = (e) => {
     const compass = e.webkitCompassHeading || Math.abs(e.alpha - 360);
     setUHeading(compass);
   };
-  // Check for iOS permission requirements
+  // check for IOS permission requirements
   if (typeof DeviceOrientationEvent.requestPermission === 'function') {
     DeviceOrientationEvent.requestPermission()
       .then(response => {
