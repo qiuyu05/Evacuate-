@@ -512,7 +512,7 @@ const brain = (() => {
 })();
 
 /* ─── SVG FLOOR PLAN COMPONENT ─── */
-const FloorPlan = ({ userPos, route, blockades, userHeading, congestion, edgeCong, exitLoadData, onClick, people, hoveredRoom, setHoveredRoom }) => {
+const FloorPlan = ({ userPos, route, blockades, userHeading, congestion, onClick, people, hoveredRoom, setHoveredRoom, earthquakeAlerts, locationCell }) => {
   const rp = route ? route.map(id => NM[id]).filter(Boolean) : [];
   
   // Convert wall segments to SVG space
@@ -648,7 +648,7 @@ const FloorPlan = ({ userPos, route, blockades, userHeading, congestion, edgeCon
         {rp.slice(1, -1).map((p, i) => <circle key={`r${i}`} cx={p.x} cy={p.y} r="2.5" fill="#00ffaa" opacity=".5"/>)}
       </g>}
 
-      {/* User position */}
+      {/* User position (Original, doesn't work with task 4) */}
       {/* {userPos && <g filter="url(#gs)">
         <circle cx={userPos.x} cy={userPos.y} r="16" fill="#00aaff08" stroke="#00aaff" strokeWidth=".8">
           <animate attributeName="r" values="12;22;12" dur="2s" repeatCount="indefinite"/>
@@ -685,8 +685,8 @@ const FloorPlan = ({ userPos, route, blockades, userHeading, congestion, edgeCon
 export default function App() {
   const [status, setStatus] = useState("STANDBY");
   const [uPos, setUPos] = useState(null);
-  const [uNode, setUNode] = useState(null);
   const [uHeading, setUHeading] = useState(0); 
+  const [uNode, setUNode] = useState(null);
   const [route, setRoute] = useState(null);
   const [wifi, setWifi] = useState(true);
   const [logs, setLogs] = useState([]);
@@ -828,19 +828,19 @@ export default function App() {
   }, [doEvac, doBlock, clearAll, doSafe, log]);
 
   // Evacuation step timer
-//   useEffect(() => {
-//     if (status !== "EVACUATING" || !route || route.length < 2) return;
-//     const iv = setInterval(() => {
-//       setProg(p => {
-//         const n = p + 1;
-//         if (n >= route.length - 1) { clearInterval(iv); doSafe(); return p; }
-//         const nn = NM[route[n]]; if (nn) { setUPos({ x: nn.x, y: nn.y }); setUNode(route[n]); }
-//         if (n === Math.floor(route.length / 2)) speak("Halfway there.");
-//         return n;
-//       });
-//     }, 1800);
-//     return () => clearInterval(iv);
-//   }, [status, route]);
+  // useEffect(() => {
+  //   if (status !== "EVACUATING" || !route || route.length < 2) return;
+  //   const iv = setInterval(() => {
+  //     setProg(p => {
+  //       const n = p + 1;
+  //       if (n >= route.length - 1) { clearInterval(iv); doSafe(); return p; }
+  //       const nn = NM[route[n]]; if (nn) { setUPos({ x: nn.x, y: nn.y }); setUNode(route[n]); }
+  //       if (n === Math.floor(route.length / 2)) speak("Halfway there.");
+  //       return n;
+  //     });
+  //   }, 1800);
+  //   return () => clearInterval(iv);
+  // }, [status, route]);
 
   // Room search
   const filteredRooms = searchQuery
@@ -918,7 +918,7 @@ useEffect(() => {
       <div style={{ padding: "14px 20px", maxWidth: 1600, margin: "0 auto" }}>
         {/* MAP */}
         <div style={{ background: "#0a0e17", border: "1px solid #1a2a40", borderRadius: 12, padding: 12, marginBottom: 14 }}>
-          <FloorPlan userPos={uPos} route={route} blockades={blocks} congestion={cong} edgeCong={eCong} exitLoadData={exLoads} onClick={onNode} people={people} hoveredRoom={hoveredRoom} setHoveredRoom={setHoveredRoom} />
+          <FloorPlan userPos={uPos} route={route} blockades={blocks} userHeading={uHeading} congestion={cong} edgeCong={eCong} exitLoadData={exLoads} onClick={onNode} people={people} hoveredRoom={hoveredRoom} setHoveredRoom={setHoveredRoom} earthquakeAlerts={earthquakeAlerts} locationCell={currentLocationCell} />
           {route && <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <span style={{ color: "#556677", fontSize: 11, fontFamily: "monospace" }}>Evacuation Progress</span>
@@ -1074,6 +1074,3 @@ useEffect(() => {
     </div>
   );
 }
-
-
-
