@@ -1,11 +1,19 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { EarthquakeDetector } from "./EarthquakeDetector";
+import { LocationCellGrid } from "./LocationCellGrid";
+import { EarthquakeEventNetwork } from "./EarthquakeEventNetwork";
 
 /* ═══════════════════════════════════════════════════════════════
-   ECHOAID — Disaster Evacuation Companion
+   ECHOAID — Disaster Evacuation Companion + Earthquake Crowd Sensing
    UW Mathematics & Computer Building No. 17 — 1st Floor
    Floor plan walls extracted from architectural PDF
    Room coordinates from GeoJSON (OpenCV + Tesseract extraction)
    Coordinate space: 3× PDF scale (Matrix 3,3) → ~3672×2376
+   
+   EARTHQUAKE SENSING:
+   - Multiple phones detect strong shaking (acceleration > threshold)
+   - Crowd confirmation: 3+ devices in same location cell within 4s
+   - Reduces false positives (car, footstep) vs single-device detection
    ═══════════════════════════════════════════════════════════════ */
 
 // Transform: GeoJSON coords → SVG viewBox coords
@@ -196,7 +204,7 @@ const brain=(()=>{let users=new Map(),blocks=[];return{
 };})();
 
 /* ─── SVG FLOOR PLAN COMPONENT ─── */
-const FloorPlan = ({ userPos, userHeading, route, blockades, congestion, onClick, people, hoveredRoom, setHoveredRoom }) => {
+const FloorPlan = ({ userPos, userHeading, route, blockades, congestion, onClick, people, hoveredRoom, setHoveredRoom, earthquakeAlerts, locationCell }) => {
   const rp = route ? route.map(id => NM[id]).filter(Boolean) : [];
   
   // Convert wall segments to SVG space
@@ -254,6 +262,53 @@ const FloorPlan = ({ userPos, userHeading, route, blockades, congestion, onClick
         const n = NM[nid]; if (!n || lv < 2) return null;
         return <circle key={`c${nid}`} cx={n.x} cy={n.y} r={5+lv*3} fill={lv>5?"#ff000022":lv>3?"#ff880018":"#ffff0012"}/>;
       })}
+
+      {/* EARTHQUAKE ALERTS (Location Cells) */}
+      {earthquakeAlerts && earthquakeAlerts.map((alert, i) => {
+        const bounds = LocationCellGrid.getCellBounds(alert.cellId);
+        if (!bounds) return null;
+        const isCurrentCell = locationCell === alert.cellId;
+        return (
+          <g key={`eq${i}`} filter={isCurrentCell ? "url(#gs)" : ""}>
+            <rect
+              x={bounds.x1}
+              y={bounds.y1}
+              width={bounds.x2 - bounds.x1}
+              height={bounds.y2 - bounds.y1}
+              fill={isCurrentCell ? "#ff000044" : "#ff880033"}
+              stroke={isCurrentCell ? "#ff0000" : "#ff8800"}
+              strokeWidth={isCurrentCell ? "2" : "1"}
+              opacity={isCurrentCell ? 0.8 : 0.5}
+            >
+              <animate attributeName="opacity" values={isCurrentCell ? "0.8;0.4;0.8" : "0.5;0.2;0.5"} dur="1.5s" repeatCount="indefinite" />
+            </rect>
+            <text
+              x={(bounds.x1 + bounds.x2) / 2}
+              y={(bounds.y1 + bounds.y2) / 2 - 8}
+              textAnchor="middle"
+              fill={isCurrentCell ? "#ff0000" : "#ff8800"}
+              fontSize={isCurrentCell ? "8" : "6"}
+              fontWeight="bold"
+              fontFamily="monospace"
+            >
+              ⚡ {alert.deviceCount}
+            </text>
+            <text
+              x={(bounds.x1 + bounds.x2) / 2}
+              y={(bounds.y1 + bounds.y2) / 2 + 8}
+              textAnchor="middle"
+              fill={isCurrentCell ? "#ff6666" : "#ffaa66"}
+              fontSize="5"
+              fontFamily="monospace"
+            >
+              {Math.round(alert.avgIntensity * 10) / 10}g
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Location cell grid (faint) */}
+      {LocationCellGrid.renderGrid(0.02)}
 
       {/* Blockades */}
       {blockades.map((b, i) => {
@@ -319,7 +374,7 @@ const FloorPlan = ({ userPos, userHeading, route, blockades, congestion, onClick
 export default function App() {
   const [status, setStatus] = useState("STANDBY");
   const [uPos, setUPos] = useState(null);
-  const [uHeading, setUHeading] = useState(0); // Add this!
+  const [uHeading, setUHeading] = useState(0); 
   const [uNode, setUNode] = useState(null);
   const [route, setRoute] = useState(null);
   const [wifi, setWifi] = useState(true);
@@ -333,8 +388,22 @@ export default function App() {
   const [showBM, setShowBM] = useState(false);
   const [hoveredRoom, setHoveredRoom] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  
+  // Earthquake detection
+  const [earthquakeEnabled, setEarthquakeEnabled] = useState(false);
+  const [earthquakeSensitivity, setEarthquakeSensitivity] = useState(2); // 1-3
+  const [earthquakeAlerts, setEarthquakeAlerts] = useState([]);
+  const [earthquakeStats, setEarthquakeStats] = useState(null);
+  const [lastShakingEvents, setLastShakingEvents] = useState([]);
+  const [eqConfig, setEqConfig] = useState({
+    N_DEVICES: 3,
+    T_WINDOW: 4000,
+  });
+  const [earthquakeTriggered, setEarthquakeTriggered] = useState(false);
+  
   const recRef = useRef(null);
   const logRef = useRef(null);
+  const eqRefreshRef = useRef(null);
 
   const log = useCallback((m, t = "info") => {
     const d = new Date();
@@ -342,8 +411,6 @@ export default function App() {
     setLogs(p => [...p.slice(-60), { msg: m, type: t, time: ts }]);
   }, []);
   useEffect(() => { logRef.current && (logRef.current.scrollTop = logRef.current.scrollHeight); }, [logs]);
-
-  // Initialize
   useEffect(() => {
     brain.seed(20); setCong(brain.cong());
     const pp = []; const rn = NODES.filter(n => n.id.startsWith("p"));
@@ -352,7 +419,98 @@ export default function App() {
     log("EchoAid initialized — MC Building floor plan loaded from PDF", "success");
     log(`${NODES.length} nodes, ${EDGES.length} edges, ${WALLS_RAW.length} wall segments`, "info");
     log("20 simulated evacuees registered with Global Brain.", "info");
-  }, []);
+    log("🚨 Earthquake crowd sensing available — enable in controls", "info");
+  }, [log]);
+
+  // Earthquake detection handler
+  const currentLocationCell = useMemo(() => {
+    return uPos ? LocationCellGrid.getCellId(uPos.x, uPos.y) : null;
+  }, [uPos]);
+
+  const handleShakingDetected = useCallback((shakingEvent) => {
+    // Submit to earthquake network
+    const report = {
+      ...shakingEvent,
+      deviceId: `phone_${Math.random().toString(36).substr(2, 5)}`, // Simulate device ID
+    };
+    
+    const event = EarthquakeEventNetwork.reportShaking(report);
+    if (event) {
+      setLastShakingEvents(prev => [event, ...prev].slice(0, 20));
+      log(`📊 Earthquake: ${shakingEvent.intensity.toFixed(1)}g in ${shakingEvent.locationCell}`, "info");
+    }
+
+    // Check if alert was triggered
+    const alert = EarthquakeEventNetwork.getAlertForCell(shakingEvent.locationCell);
+    const allAlerts = EarthquakeEventNetwork.getAlerts();
+    setEarthquakeAlerts(allAlerts);
+
+    if (alert && !earthquakeTriggered) {
+      setEarthquakeTriggered(true);
+      log(`🚨🚨 EARTHQUAKE ALERT: ${alert.deviceCount} devices detected shaking! Confidence: ${alert.confidence.toFixed(0)}%`, "error");
+      speak(`Earthquake detected! ${alert.deviceCount} devices confirmed. Evacuate immediately.`);
+      
+      // Auto-trigger evacuation
+      if (uNode) {
+        setTimeout(() => {
+          setStatus("EVACUATING");
+          setProg(0);
+          const p = brain.route(uNode, "main");
+          if (p) {
+            setRoute(p);
+            log("🚨 AUTO-EVACUATION TRIGGERED by earthquake network", "error");
+            speak("Automatic evacuation route activated.");
+          }
+        }, 500);
+      }
+    }
+
+    // Update stats
+    const stats = EarthquakeEventNetwork.getStats();
+    setEarthquakeStats(stats);
+  }, [uNode, earthquakeTriggered, log]);
+
+  const handleEarthquakeToggle = useCallback(() => {
+    if (!earthquakeEnabled) {
+      log("📡 Earthquake detection: ENABLED", "success");
+      speak("Earthquake detection activated.");
+    } else {
+      log("📡 Earthquake detection: DISABLED", "warn");
+      EarthquakeEventNetwork.reset();
+      setEarthquakeAlerts([]);
+      setLastShakingEvents([]);
+      setEarthquakeTriggered(false);
+    }
+    setEarthquakeEnabled(!earthquakeEnabled);
+  }, [earthquakeEnabled, log]);
+
+  const updateEqConfig = useCallback((key, value) => {
+    const newConfig = { ...eqConfig, [key]: value };
+    setEqConfig(newConfig);
+    EarthquakeEventNetwork.setConfig(newConfig);
+    log(`⚙️ Earthquake config: ${key} = ${value}`, "info");
+  }, [eqConfig, log]);
+
+  // Simulate random earthquake events for testing
+  const simulateEarthquake = useCallback(() => {
+    const cells = LocationCellGrid.getAllCells().slice(5, 25);
+    for (let i = 0; i < 4; i++) {
+      const cell = cells[Math.floor(Math.random() * cells.length)];
+      setTimeout(() => {
+        const event = {
+          timestamp: Date.now() + i * 500,
+          locationCell: cell,
+          intensity: 3.5 + Math.random() * 2,
+          deviceId: `sim_${i}`,
+          features: {},
+        };
+        // Process through the normal handler to trigger evacuation
+        handleShakingDetected(event);
+        setLastShakingEvents(prev => [event, ...prev].slice(0, 20));
+      }, i * 200);
+    }
+    log("🔬 Simulated earthquake event injected (4 devices)", "warn");
+  }, [log, handleShakingDetected]);
 
   const evac = useCallback((nid) => {
     setStatus("EVACUATING"); setProg(0);
@@ -521,7 +679,7 @@ useEffect(() => {
       <div style={{ padding: "14px 20px", maxWidth: 1600, margin: "0 auto" }}>
         {/* MAP */}
         <div style={{ background: "#0a0e17", border: "1px solid #1a2a40", borderRadius: 12, padding: 12, marginBottom: 14 }}>
-          <FloorPlan userPos={uPos} route={route} userHeading={uHeading} blockades={blocks} congestion={cong} onClick={onNode} people={people} hoveredRoom={hoveredRoom} setHoveredRoom={setHoveredRoom} />
+          <FloorPlan userPos={uPos} route={route} blockades={blocks} userHeading={uHeading} congestion={cong} onClick={onNode} people={people} hoveredRoom={hoveredRoom} setHoveredRoom={setHoveredRoom} />
           {route && <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <span style={{ color: "#556677", fontSize: 11, fontFamily: "monospace" }}>Evacuation Progress</span>
@@ -579,6 +737,43 @@ useEffect(() => {
                   style={{ background: "#1a2230", border: "1px solid #2a3a50", borderRadius: 5, padding: "4px 8px", color: "#7799bb", fontSize: 9, fontFamily: "monospace", cursor: "pointer" }}>{c}</button>
               ))}
             </div>
+          </div>
+
+          {/* EARTHQUAKE DETECTION */}
+          <div style={{ background: "#0d1117", border: `1px solid ${earthquakeEnabled ? "#ff6644" : "#1a2a40"}`, borderRadius: 10, padding: 14 }}>
+            <div style={{ color: earthquakeEnabled ? "#ff8844" : "#8899bb", fontSize: 10, fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>⚡ Earthquake Crowd Sensing</div>
+            
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <button onClick={handleEarthquakeToggle} style={{ padding: "8px 14px", borderRadius: 7, border: `1px solid ${earthquakeEnabled ? "#ff6644" : "#1a2a40"}`, background: earthquakeEnabled ? "#ff664415" : "#0a0e14", color: earthquakeEnabled ? "#ff8844" : "#556677", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, cursor: "pointer", fontWeight: earthquakeEnabled ? 600 : 400 }}>
+                {earthquakeEnabled ? "✓ ACTIVE" : "○ INACTIVE"}
+              </button>
+              {earthquakeEnabled && (
+                <button onClick={simulateEarthquake} style={{ padding: "8px 14px", borderRadius: 7, border: "1px solid #ff880040", background: "#ff880010", color: "#ffaa66", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, cursor: "pointer", fontWeight: 500 }}>
+                  🔬 TEST SHAKE
+                </button>
+              )}
+            </div>
+
+            {earthquakeEnabled && (
+              <div style={{ background: "#0a0e14", borderRadius: 6, padding: 8, marginBottom: 8 }}>
+                <div style={{ color: "#8899bb", fontSize: 9, fontFamily: "monospace", marginBottom: 6 }}>Configuration:</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
+                  <div>
+                    <label style={{ color: "#556677", fontSize: 8, fontFamily: "monospace", display: "block", marginBottom: 2 }}>Min Devices</label>
+                    <input type="number" min="2" max="10" value={eqConfig.N_DEVICES} onChange={(e) => updateEqConfig("N_DEVICES", parseInt(e.target.value))}
+                      style={{ width: "100%", padding: "4px 6px", borderRadius: 4, border: "1px solid #1a2a40", background: "#0a0e14", color: "#c0d0e0", fontFamily: "monospace", fontSize: 10 }} />
+                  </div>
+                  <div>
+                    <label style={{ color: "#556677", fontSize: 8, fontFamily: "monospace", display: "block", marginBottom: 2 }}>Time Window (ms)</label>
+                    <input type="number" min="2000" max="10000" step="500" value={eqConfig.T_WINDOW} onChange={(e) => updateEqConfig("T_WINDOW", parseInt(e.target.value))}
+                      style={{ width: "100%", padding: "4px 6px", borderRadius: 4, border: "1px solid #1a2a40", background: "#0a0e14", color: "#c0d0e0", fontFamily: "monospace", fontSize: 10 }} />
+                  </div>
+                </div>
+                <div style={{ color: "#334455", fontSize: 8, fontFamily: "monospace", lineHeight: 1.4 }}>
+                  {earthquakeAlerts.length > 0 ? `🚨 ALERT: ${earthquakeAlerts.length} cell(s) detected` : earthquakeTriggered ? "✓ Evacuation triggered" : earthquakeStats ? `📊 ${earthquakeStats.totalEvents} events, ${earthquakeStats.activeDevices} device(s)` : "Listening for motion..."}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Connectivity */}
