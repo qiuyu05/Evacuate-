@@ -512,7 +512,7 @@ const brain = (() => {
 })();
 
 /* ─── SVG FLOOR PLAN COMPONENT ─── */
-const FloorPlan = ({ userPos, route, blockades, userHeading, congestion, edgeCong, exitLoadData, onClick, people, hoveredRoom, setHoveredRoom }) => {
+const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadData, onClick, people, hoveredRoom, setHoveredRoom }) => {
   const rp = route ? route.map(id => NM[id]).filter(Boolean) : [];
   
   // Convert wall segments to SVG space
@@ -649,22 +649,22 @@ const FloorPlan = ({ userPos, route, blockades, userHeading, congestion, edgeCon
       </g>}
 
       {/* User position */}
-      {/* {userPos && <g filter="url(#gs)">
+      {userPos && <g filter="url(#gs)">
         <circle cx={userPos.x} cy={userPos.y} r="16" fill="#00aaff08" stroke="#00aaff" strokeWidth=".8">
           <animate attributeName="r" values="12;22;12" dur="2s" repeatCount="indefinite"/>
           <animate attributeName="opacity" values=".6;.12;.6" dur="2s" repeatCount="indefinite"/>
         </circle>
         <circle cx={userPos.x} cy={userPos.y} r="6" fill="#00ccff"/>
         <circle cx={userPos.x} cy={userPos.y} r="2.5" fill="#fff"/>
-      </g>} */}
+      </g>}
 
       {/* user position - hopefully with arrow + map rotation according to gyroscope? */}
-      {userPos && (
+      {/* {userPos && (
         <g transform={`translate(${userPos.x}, ${userPos.y}) rotate(${userHeading || 0})`}>
           <circle r="16" fill="#00aaff08" stroke="#00aaff" strokeWidth=".8" />
           <path d="M0 -12 L7 6 L0 2 L-7 6 Z" fill="#00ccff" /> 
         </g>
-      )}
+      )} */}
 
       {/* Destination */}
       {route && rp.length > 0 && <g filter="url(#gl)">
@@ -673,6 +673,13 @@ const FloorPlan = ({ userPos, route, blockades, userHeading, congestion, edgeCon
           <animate attributeName="opacity" values="1;.2;1" dur="1.5s" repeatCount="indefinite"/>
         </circle>
       </g>}
+
+    {/* Debugging Label */}
+    {userPos && (
+    <text x="500" y="500" fill="yellow" fontSize="14" fontWeight="bold">
+        X: {userPos.x.toFixed(0)} Y: {userPos.y.toFixed(0)}
+    </text>
+    )}
 
       <text x="18" y="810" fill="#1a2a4050" fontSize="7" fontFamily="monospace">MC Building No.17 — 1st Floor — University of Waterloo — EchoAid GeoJSON</text>
     </svg>
@@ -686,7 +693,6 @@ export default function App() {
   const [status, setStatus] = useState("STANDBY");
   const [uPos, setUPos] = useState(null);
   const [uNode, setUNode] = useState(null);
-  const [uHeading, setUHeading] = useState(0); 
   const [route, setRoute] = useState(null);
   const [wifi, setWifi] = useState(true);
   const [logs, setLogs] = useState([]);
@@ -741,7 +747,7 @@ export default function App() {
     simRef.current = setInterval(() => {
       brain.tick();
       refreshBrain();
-    }, 3000);
+    }, 5000);
     return () => clearInterval(simRef.current);
   }, [refreshBrain]);
 
@@ -828,19 +834,19 @@ export default function App() {
   }, [doEvac, doBlock, clearAll, doSafe, log]);
 
   // Evacuation step timer
-//   useEffect(() => {
-//     if (status !== "EVACUATING" || !route || route.length < 2) return;
-//     const iv = setInterval(() => {
-//       setProg(p => {
-//         const n = p + 1;
-//         if (n >= route.length - 1) { clearInterval(iv); doSafe(); return p; }
-//         const nn = NM[route[n]]; if (nn) { setUPos({ x: nn.x, y: nn.y }); setUNode(route[n]); }
-//         if (n === Math.floor(route.length / 2)) speak("Halfway there.");
-//         return n;
-//       });
-//     }, 1800);
-//     return () => clearInterval(iv);
-//   }, [status, route]);
+  useEffect(() => {
+    if (status !== "EVACUATING" || !route || route.length < 2) return;
+    const iv = setInterval(() => {
+      setProg(p => {
+        const n = p + 1;
+        if (n >= route.length - 1) { clearInterval(iv); doSafe(); return p; }
+        const nn = NM[route[n]]; if (nn) { setUPos({ x: nn.x, y: nn.y }); setUNode(route[n]); }
+        if (n === Math.floor(route.length / 2)) speak("Halfway there.");
+        return n;
+      });
+    }, 5000);
+    return () => clearInterval(iv);
+  }, [status, route]);
 
   // Room search
   const filteredRooms = searchQuery
@@ -849,42 +855,43 @@ export default function App() {
 
   const sc = status === "EVACUATING" ? "#ff4444" : status === "SAFE" ? "#00ff88" : "#00aaff";
 
-// task 4: real-time geolocation
-useEffect(() => {
-  if (status !== "EVACUATING") return;
-  const watchId = navigator.geolocation.watchPosition(
-    (position) => {
-      const { latitude, longitude } = position.coords;
-      const mapX = (longitude - (-80.5447)) * 100000; 
-      const mapY = (latitude - 43.4723) * 100000;
+// useEffect(() => {
+//   if (status !== "EVACUATING") return;
 
-      setUPos({ x: mapX, y: mapY });
-    },
-    (err) => console.error("GPS Error:", err),
-    { enableHighAccuracy: true }
-  );
-  // gyroscope
-  const handleOrientation = (e) => {
-    const compass = e.webkitCompassHeading || Math.abs(e.alpha - 360);
-    setUHeading(compass);
-  };
-  // check for IOS permission requirements
-  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission()
-      .then(response => {
-        if (response === 'granted') {
-          window.addEventListener('deviceorientation', handleOrientation);
-        }
-      })
-      .catch(console.error);
-  } else { // Non-iOS devices
-    window.addEventListener('deviceorientation', handleOrientation);
-  }
-  return () => {
-    navigator.geolocation.clearWatch(watchId);
-    window.removeEventListener('deviceorientation', handleOrientation);
-  };
-}, [status]);
+//   const lonOffset = -80.5447; 
+//   const latOffset = 43.4723;
+//   const multiplier = 200000;
+
+//   const watchId = navigator.geolocation.watchPosition((pos) => {
+//     const { latitude, longitude } = pos.coords;
+//     setUPos({ 
+//       x: tx((longitude - lonOffset) * multiplier), 
+//       y: ty((latitude - latOffset) * multiplier) 
+//     });
+//   }, err => console.error(err), { enableHighAccuracy: true });
+  
+//   // Gyroscope
+//   const handleOrientation = (e) => {
+//     const compass = e.webkitCompassHeading || Math.abs(e.alpha - 360);
+//     setUHeading(compass);
+//   };
+//   if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+//     DeviceOrientationEvent.requestPermission()
+//       .then(response => {
+//         if (response === 'granted') {
+//           window.addEventListener('deviceorientation', handleOrientation);
+//         }
+//       })
+//       .catch(console.error);
+//   } else {
+//     window.addEventListener('deviceorientation', handleOrientation);
+//   }
+
+//   return () => {
+//     navigator.geolocation.clearWatch(watchId);
+//     window.removeEventListener('deviceorientation', handleOrientation);
+//   };
+// }, [status]); // Trigger when status changes to 'EVACUATING'
 
 
   return (
