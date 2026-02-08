@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { io } from "socket.io-client";
 
 /* ═══════════════════════════════════════════════════════════════
    ECHOAID — Disaster Evacuation Companion
@@ -1956,7 +1957,7 @@ const brain = (() => {
 })();
 
 /* ─── SVG FLOOR PLAN COMPONENT ─── */
-const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadData, onClick, people, hoveredRoom, setHoveredRoom, clients, adminMode, mode, userHeading }) => {
+const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadData, onClick, people, hoveredRoom, setHoveredRoom, clients, adminMode, mode, userHeading, otherUsers }) => {
   const rp = route ? route.map(id => NM[id]).filter(Boolean) : [];
 
   // Convert wall segments to SVG space
@@ -2104,8 +2105,8 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
         );
       })}
 
-      {/* Client Routes in Admin Mode */}
-      {adminMode && clients && clients.map(client => {
+      {/* Client Routes in Admin Mode (not in LIVE mode) */}
+      {adminMode && mode !== 'LIVE' && clients && clients.map(client => {
         const clientRoute = client.route ? client.route.map(id => NM[id]).filter(Boolean) : [];
         if (clientRoute.length < 2) return null;
         return (
@@ -2136,8 +2137,8 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
         {rp.slice(1, -1).map((p, i) => <circle key={`r${i}`} cx={p.x} cy={p.y} r="2.5" fill="#00ffaa" opacity=".5"/>)}
       </g>}
 
-      {/* Client Positions in Admin Mode */}
-      {adminMode && clients && clients.map(client => (
+      {/* Client Positions in Admin Mode (not in LIVE mode) */}
+      {adminMode && mode !== 'LIVE' && clients && clients.map(client => (
         <g key={`cp${client.id}`} filter="url(#gs)">
           <circle cx={client.pos.x} cy={client.pos.y} r="14" fill={`${client.color}08`} stroke={client.color} strokeWidth=".8">
             <animate attributeName="r" values="10;18;10" dur="2s" repeatCount="indefinite"/>
@@ -2173,6 +2174,30 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
         </g>
       )}
 
+      {/* Other Connected Users (LIVE Mode) */}
+      {!adminMode && mode === "LIVE" && Object.entries(otherUsers).map(([userId, user]) => {
+        const userNode = NM[user.currentNode];
+        if (!userNode) return null;
+        return (
+          <g key={`other-${userId}`} filter="url(#gs)">
+            {/* Pulsing circle */}
+            <circle cx={userNode.x} cy={userNode.y} r="14" fill="#ff880008" stroke="#ff8800" strokeWidth=".8">
+              <animate attributeName="r" values="10;18;10" dur="2s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values=".6;.12;.6" dur="2s" repeatCount="indefinite"/>
+            </circle>
+            {/* User dot */}
+            <circle cx={userNode.x} cy={userNode.y} r="5" fill="#ff8800"/>
+            <circle cx={userNode.x} cy={userNode.y} r="2" fill="#fff"/>
+            {/* Name label */}
+            {user.name && (
+              <text x={userNode.x} y={userNode.y - 20} textAnchor="middle" fill="#ff8800" fontSize="7" fontFamily="monospace" fontWeight="bold">
+                {user.name}
+              </text>
+            )}
+          </g>
+        );
+      })}
+
       {/* Destination (Single Client Mode) */}
       {!adminMode && route && rp.length > 0 && <g filter="url(#gl)">
         <circle cx={rp[rp.length-1].x} cy={rp[rp.length-1].y} r="10" fill="none" stroke="#00ff88" strokeWidth="2">
@@ -2191,15 +2216,14 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
    MAIN APP — ECHOAID
    ═══════════════════════════════════════ */
 export default function App() {
-  // Initialize 5 controllable clients
+  // Initial simulated clients for SIMULATION mode
   const initialClients = [
-    { id: 1, name: "Client Alpha", pos: { x: tx(1783), y: ty(955) }, node: "p48", route: null, status: "STANDBY", progress: 0, color: "#00aaff" },
-    { id: 2, name: "Client Beta", pos: { x: tx(1418), y: ty(1014) }, node: "p43", route: null, status: "STANDBY", progress: 0, color: "#00ff88" },
-    { id: 3, name: "Client Gamma", pos: { x: tx(2047), y: ty(1018) }, node: "p6", route: null, status: "STANDBY", progress: 0, color: "#ffaa00" },
-    { id: 4, name: "Client Delta", pos: { x: tx(1289), y: ty(980) }, node: "p71", route: null, status: "STANDBY", progress: 0, color: "#ff44aa" },
-    { id: 5, name: "Client Epsilon", pos: { x: tx(2194), y: ty(948) }, node: "p54", route: null, status: "STANDBY", progress: 0, color: "#4488ff" },
+    { id: 1, name: "👤 alpha", color: "#3b82f6", node: "p48", pos: { x: NM["p48"].x, y: NM["p48"].y }, status: "STANDBY", route: null, progress: 0 },
+    { id: 2, name: "👤 beta", color: "#10b981", node: "p107", pos: { x: NM["p107"].x, y: NM["p107"].y }, status: "STANDBY", route: null, progress: 0 },
+    { id: 3, name: "👤 gamma", color: "#f59e0b", node: "p129", pos: { x: NM["p129"].x, y: NM["p129"].y }, status: "STANDBY", route: null, progress: 0 },
+    { id: 4, name: "👤 delta", color: "#8b5cf6", node: "p131", pos: { x: NM["p131"].x, y: NM["p131"].y }, status: "STANDBY", route: null, progress: 0 }
   ];
-  
+
   const [clients, setClients] = useState(initialClients);
   const [activeClientId, setActiveClientId] = useState(1);
   const [mode, setMode] = useState("SIMULATION"); // SIMULATION or LIVE
@@ -2221,6 +2245,16 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [adminMode, setAdminMode] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+
+  // Socket.IO state for LIVE mode
+  const [socket, setSocket] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [serverUrl, setServerUrl] = useState('');
+  const [otherUsers, setOtherUsers] = useState({}); // Track other connected users
+  const [voiceDirections, setVoiceDirections] = useState([]); // Turn-by-turn directions
+  const [currentDirection, setCurrentDirection] = useState(0); // Current step in directions
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false); // Audio playback status
+
   const recRef = useRef(null);
   const logRef = useRef(null);
   const simRef = useRef(null);
@@ -2230,6 +2264,51 @@ export default function App() {
   const activeClient = clients.find(c => c.id === activeClientId);
   const updateClient = useCallback((id, updates) => {
     setClients(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+  }, []);
+
+  // Function to play base64-encoded audio from ElevenLabs
+  const playBase64Audio = useCallback((base64Audio) => {
+    if (!base64Audio) {
+      console.log('⚠️  No audio data to play');
+      return;
+    }
+
+    try {
+      // Convert base64 to blob
+      const byteCharacters = atob(base64Audio);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'audio/mpeg' });
+
+      // Create audio element and play
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+
+      setIsPlayingAudio(true);
+      console.log('🔊 Playing audio...');
+
+      audio.onended = () => {
+        setIsPlayingAudio(false);
+        URL.revokeObjectURL(audioUrl);
+        console.log('✅ Audio playback finished');
+      };
+
+      audio.onerror = (e) => {
+        setIsPlayingAudio(false);
+        console.error('❌ Audio playback error:', e);
+      };
+
+      audio.play().catch(err => {
+        console.error('❌ Failed to play audio:', err);
+        setIsPlayingAudio(false);
+      });
+    } catch (error) {
+      console.error('❌ Error processing audio:', error);
+      setIsPlayingAudio(false);
+    }
   }, []);
 
   const log = useCallback((m, t = "info") => {
@@ -2247,6 +2326,232 @@ export default function App() {
     setAnalytics(brain.analytics());
     setPeople(brain.getUserPositions());
   }, []);
+
+  // Socket.IO connection for LIVE mode
+  useEffect(() => {
+    if (mode === 'LIVE' && !socket) {
+      console.log('🔵 LIVE mode activated, prompting for URL...');
+
+      try {
+        // Prompt user for server URL
+        const url = prompt('Enter EchoAid server URL:\n\n(Use ngrok URL for phones, or http://localhost:5001 for local testing)') || 'http://localhost:5001';
+        console.log('🔵 User entered URL:', url);
+        setServerUrl(url);
+
+        log(`Connecting to ${url}...`, 'info');
+
+        // Connect to Flask Socket.IO server
+        // Use polling first for better ngrok compatibility
+        const newSocket = io(url, {
+          transports: ['polling', 'websocket'], // Polling first for ngrok
+          reconnection: true,
+          reconnectionDelay: 1000,
+          reconnectionAttempts: 5,
+          upgrade: false, // Disable auto-upgrade to websocket
+          extraHeaders: {
+            'bypass-tunnel-reminder': 'true' // Bypass localtunnel security page
+          }
+        });
+
+      newSocket.on('connect', () => {
+        console.log('✅ Connected to EchoAid server');
+        setIsConnected(true);
+        log('Connected to server', 'success');
+
+        // Get user's name
+        const userName = prompt('Enter your name:') || 'Anonymous';
+
+        // Create a LIVE client entry for this phone user (in STANDBY - not evacuating yet)
+        const liveClientId = 999; // Special ID for LIVE mode user
+        const startNode = 'p129'; // Default hallway h4 - user can change by clicking map
+
+        const liveClient = {
+          id: liveClientId,
+          name: `📱 ${userName}`,
+          color: '#00ff88',
+          node: startNode,
+          pos: { x: NM[startNode].x, y: NM[startNode].y },
+          status: 'STANDBY',
+          route: null,
+          progress: 0
+        };
+
+        // Add/update LIVE client in clients array
+        setClients(prev => {
+          const filtered = prev.filter(c => c.id !== liveClientId);
+          return [...filtered, liveClient];
+        });
+
+        // Set as active client
+        setActiveClientId(liveClientId);
+        console.log('👤 Created LIVE client:', liveClient);
+
+        log('Click a room on the map to set your starting position, then press EVACUATE', 'info');
+      });
+
+      newSocket.on('disconnect', () => {
+        console.log('❌ Disconnected from server');
+        setIsConnected(false);
+        log('Disconnected from server', 'error');
+      });
+
+      newSocket.on('connected', (data) => {
+        log(`Server says: ${data.message}`, 'info');
+      });
+
+      newSocket.on('route_assigned', (data) => {
+        console.log('🛤️  Route assigned from server!');
+        console.log('📦 Full data:', data);
+        console.log('📍 Route:', data.route);
+        console.log('🎯 Destination:', data.destination);
+        log(`Route assigned to ${data.destination} (${data.route?.length || 0} nodes)`, 'route');
+
+        // Store turn-by-turn directions
+        if (data.directions) {
+          setVoiceDirections(data.directions);
+          setCurrentDirection(0);
+          console.log('🧭 Received directions:', data.directions);
+
+          // Log directions to terminal
+          data.directions.forEach((dir, idx) => {
+            console.log(`   ${idx + 1}. ${dir.instruction}`);
+            log(`${idx + 1}. ${dir.instruction}`, 'info');
+          });
+        }
+
+        // Play welcome or reroute audio
+        if (data.welcomeAudio) {
+          console.log('🔊 Playing welcome audio...');
+          playBase64Audio(data.welcomeAudio);
+        } else if (data.rerouteAudio) {
+          console.log('🔊 Playing reroute audio...');
+          playBase64Audio(data.rerouteAudio);
+          log('🔄 Rerouted!', 'info');
+        }
+
+        // Update active client's route (for visualization)
+        setClients(prev => {
+          console.log('🔄 Updating clients with new route...');
+          console.log('👤 Active client ID:', activeClientId);
+
+          return prev.map(c => {
+            if (c.id === activeClientId) {
+              // Get starting node from route
+              const startNode = data.route && data.route.length > 0 ? data.route[0] : null;
+              const nodeInfo = startNode ? NM[startNode] : null;
+
+              const updatedClient = {
+                ...c,
+                route: data.route,
+                status: 'EVACUATING',
+                progress: 0,
+                node: startNode || c.node,
+                pos: nodeInfo ? { x: nodeInfo.x, y: nodeInfo.y } : c.pos
+              };
+
+              console.log('✅ Updated client:', updatedClient);
+              return updatedClient;
+            }
+            return c;
+          });
+        });
+      });
+
+      newSocket.on('user_position', (data) => {
+        // Update other user's position for real-time visualization
+        console.log(`User ${data.userId} at ${data.currentNode}`);
+        setOtherUsers(prev => ({
+          ...prev,
+          [data.userId]: {
+            ...prev[data.userId],
+            currentNode: data.currentNode,
+            progress: data.progress,
+            lastUpdate: Date.now()
+          }
+        }));
+      });
+
+      newSocket.on('blockage_added', (data) => {
+        log(`⚠️  Blockage at ${data.location}: ${data.message}`, 'error');
+        log(`${data.reroutedUsers} users rerouted`, 'info');
+      });
+
+      newSocket.on('blockage_alert', (data) => {
+        console.log(`🚨 Blockage alert! ${data.distance}m ahead at ${data.location}`);
+        log(`🚨 ${data.severity} BLOCKAGE AHEAD!`, 'error');
+        log(`Distance: ${data.distance} meters`, 'error');
+        log(`Type: ${data.type}`, 'error');
+
+        // Play blockage warning audio
+        if (data.alertAudio) {
+          console.log('🔊 Playing blockage alert audio...');
+          playBase64Audio(data.alertAudio);
+        }
+      });
+
+      newSocket.on('user_joined', (data) => {
+        log(`👤 ${data.name} joined evacuation`, 'info');
+        // Add new user to tracking
+        setOtherUsers(prev => ({
+          ...prev,
+          [data.userId]: {
+            name: data.name,
+            currentNode: data.position,
+            progress: 0,
+            lastUpdate: Date.now()
+          }
+        }));
+      });
+
+      newSocket.on('user_left', (data) => {
+        log(`👋 User left evacuation`, 'info');
+        // Remove user from tracking
+        setOtherUsers(prev => {
+          const updated = { ...prev };
+          delete updated[data.userId];
+          return updated;
+        });
+      });
+
+      newSocket.on('error', (data) => {
+        log(`Error: ${data.message}`, 'error');
+        alert(`Server Error: ${data.message}`);
+      });
+
+        setSocket(newSocket);
+      } catch (error) {
+        console.error('❌ Error in LIVE mode setup:', error);
+        log(`Error: ${error.message}`, 'error');
+      }
+    } else if (mode === 'SIMULATION' && socket) {
+      // Disconnect when switching back to simulation
+      socket.disconnect();
+      setSocket(null);
+      setIsConnected(false);
+      log('Switched to simulation mode', 'info');
+    }
+
+    // Cleanup on unmount only
+    return () => {
+      if (socket) {
+        socket.disconnect();
+      }
+    };
+  }, [mode]); // Only depend on mode changes to prevent infinite loops
+
+  // Send position updates to server in LIVE mode
+  useEffect(() => {
+    if (mode === 'LIVE' && socket && isConnected && activeClient) {
+      const interval = setInterval(() => {
+        socket.emit('position_update', {
+          currentNode: activeClient.node,
+          progress: activeClient.progress || 0
+        });
+      }, 2000); // Every 2 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [mode, socket, isConnected, activeClient]);
 
   // Enable sensors for live tracking (iOS requires permission)
   const enableSensors = useCallback(async () => {
@@ -2309,7 +2614,7 @@ export default function App() {
 
   // LIVE mode sensor tracking
   useEffect(() => {
-    if (mode !== "LIVE" || !sensorPermission || activeClient.status !== "EVACUATING") return;
+    if (mode !== "LIVE" || !sensorPermission || !activeClient || activeClient.status !== "EVACUATING") return;
 
     // ═══════════════════════════════════════════════════════
     // 🎛️  SENSITIVITY CONTROLS - Edit these values:
@@ -2334,24 +2639,27 @@ export default function App() {
     let sampleCount = 0; // For debug logging
 
     const handleMotion = (event) => {
-      const acc = event.accelerationIncludingGravity;
-      if (!acc) return;
-    
-      const magnitude = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2);
-      const delta = Math.abs(magnitude - lastAcceleration);
-      lastAcceleration = magnitude;
-    
-      // Debug: Log acceleration every 20 samples to see what's happening
-      sampleCount++;
-      if (sampleCount % 20 === 0) {
-        console.log(`📊 Accel delta: ${delta.toFixed(2)} (threshold: ${STEP_THRESHOLD})`);
-      }
-    
-      if (delta > STEP_THRESHOLD) {
-        console.log(`✅ STEP DETECTED! Delta: ${delta.toFixed(2)}`); // Debug log
-        const now = Date.now();
-        if (now - lastStepTime.current < DEBOUNCE_MS) return; // Debounce steps
-        lastStepTime.current = now;
+      try {
+        const acc = event.accelerationIncludingGravity;
+        if (!acc || !acc.x || !acc.y || !acc.z) return;
+
+        const magnitude = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2);
+        if (!isFinite(magnitude)) return; // Skip NaN or Infinity
+
+        const delta = Math.abs(magnitude - lastAcceleration);
+        lastAcceleration = magnitude;
+
+        // Debug: Log acceleration every 20 samples to see what's happening
+        sampleCount++;
+        if (sampleCount % 20 === 0) {
+          console.log(`📊 Accel delta: ${delta.toFixed(2)} (threshold: ${STEP_THRESHOLD})`);
+        }
+
+        if (delta > STEP_THRESHOLD) {
+          console.log(`✅ STEP DETECTED! Delta: ${delta.toFixed(2)}`); // Debug log
+          const now = Date.now();
+          if (now - lastStepTime.current < DEBOUNCE_MS) return; // Debounce steps
+          lastStepTime.current = now;
     
         setClients(prevClients => {
           return prevClients.map(client => {
@@ -2526,12 +2834,28 @@ export default function App() {
           });
         });
       }
+      } catch (error) {
+        console.error('❌ Motion handler error:', error);
+      }
     };
 
     const handleOrientation = (e) => {
-      const compass = e.webkitCompassHeading || Math.abs(e.alpha - 360);
-      headingRef.current = compass;
-      setUserHeading(compass);
+      // Handle both iOS (webkitCompassHeading) and Android (alpha)
+      let compass = 0;
+      if (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) {
+        compass = e.webkitCompassHeading;
+      } else if (e.alpha !== undefined && e.alpha !== null) {
+        compass = Math.abs(e.alpha - 360);
+      } else {
+        // Default to 0 if no orientation data available
+        compass = 0;
+      }
+
+      // Only update if we have a valid number
+      if (!isNaN(compass) && isFinite(compass)) {
+        headingRef.current = compass;
+        setUserHeading(compass);
+      }
     };
 
     window.addEventListener('devicemotion', handleMotion);
@@ -2545,7 +2869,7 @@ export default function App() {
 
   // Initialize
   useEffect(() => {
-    brain.seed(30); // 30 simulated evacuees for richer demo
+    brain.seed(0); // No simulated evacuees - only real connected users
     refreshBrain();
     log("EchoAid initialized — MC Building floor plan loaded from PDF", "success");
     log(`${NODES.length} nodes, ${EDGES.length} edges, ${WALLS_RAW.length} wall segments`, "info");
@@ -2568,6 +2892,23 @@ export default function App() {
   }, [refreshBrain, mode]);
 
   const evac = useCallback((nid, clientId = activeClientId) => {
+    console.log('🚀 evac() called with:', { nid, clientId, mode, isConnected });
+
+    // LIVE mode: Use Socket.IO server for routing
+    if (mode === "LIVE" && socket && isConnected) {
+      log("📡 LIVE mode: Requesting route from server...", "route");
+      console.log('📡 Emitting request_reroute to server');
+
+      // Update client status and node
+      updateClient(clientId, { node: nid, status: "EVACUATING", progress: 0 });
+
+      // Request reroute from server
+      socket.emit('request_reroute', {});
+      console.log('✅ request_reroute emitted');
+      return;
+    }
+
+    // SIMULATION mode: Use local brain routing
     const p = wifi ? brain.route(nid, "main") : brain.localRoute(nid);
     log(wifi ? "🌐 Global Brain: congestion-aware routing..." : "📶 Local Brain: nearest exit...", "route");
     if (p) {
@@ -2587,25 +2928,92 @@ export default function App() {
       log("⚠ No route found!", "error");
       speak("Warning. No route found.");
     }
-  }, [wifi, log, refreshBrain, activeClientId, clients, updateClient]);
+  }, [mode, socket, isConnected, wifi, log, refreshBrain, activeClientId, clients, updateClient]);
+
+  // Helper: Find nearest hallway node from any position
+  const getNearestHallwayNode = useCallback((fromNode) => {
+    // Valid hallway nodes for pathfinding
+    const hallwayNodes = ["p129", "p131", "p107", "p135", "p101", "p130", "p134"];
+
+    const fromPos = NM[fromNode];
+    if (!fromPos) return "p129"; // Default fallback
+
+    let nearestNode = "p129";
+    let minDistance = Infinity;
+
+    for (const hallwayNode of hallwayNodes) {
+      const hallwayPos = NM[hallwayNode];
+      if (!hallwayPos) continue;
+
+      const dx = hallwayPos.x - fromPos.x;
+      const dy = hallwayPos.y - fromPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestNode = hallwayNode;
+      }
+    }
+
+    return nearestNode;
+  }, []);
+
+  const doEvac = useCallback(() => {
+    let currentNode = activeClient?.node;
+
+    // In LIVE mode, use current position to calculate route from nearest hallway
+    if (mode === "LIVE" && socket && isConnected) {
+      if (currentNode) {
+        const nearestHallway = getNearestHallwayNode(currentNode);
+        const clickedInfo = NM[currentNode];
+        const hallwayInfo = NM[nearestHallway];
+
+        log(`📍 Calculating route from ${clickedInfo?.label || currentNode} via ${hallwayInfo?.label || nearestHallway}`, "info");
+
+        // Update status to EVACUATING but keep current position
+        updateClient(activeClientId, { status: 'EVACUATING' });
+
+        // Send join_evacuation to server with nearest hallway as starting point
+        log(`🚀 Starting evacuation from ${nearestHallway}...`, 'info');
+        socket.emit('join_evacuation', {
+          name: activeClient?.name || 'Anonymous',
+          startNode: nearestHallway
+        });
+      } else {
+        // No node selected, default to central hallway
+        const defaultNode = "p129";
+        updateClient(activeClientId, { node: defaultNode, pos: { x: NM[defaultNode].x, y: NM[defaultNode].y }, status: 'EVACUATING' });
+        log(`📍 LIVE mode: Using hallway h4 as starting point`, "info");
+
+        socket.emit('join_evacuation', {
+          name: activeClient?.name || 'Anonymous',
+          startNode: defaultNode
+        });
+      }
+    } else if (!currentNode) {
+      const d = "p48";
+      updateClient(activeClientId, { node: d, pos: { x: NM[d].x, y: NM[d].y } });
+      log(`${activeClient?.name}: Auto-placed in MC 1052.`, "warn");
+      evac(d);
+    } else {
+      // SIMULATION mode - use local pathfinding
+      evac(currentNode);
+    }
+  }, [activeClient, evac, log, activeClientId, updateClient, mode, socket, isConnected, getNearestHallwayNode]);
 
   const onNode = useCallback(n => {
     if (!n) return;
     updateClient(activeClientId, { node: n.id, pos: { x: n.x, y: n.y } });
     log(`📍 ${activeClient?.name}: Location set to ${n.label || n.id}`);
-    if (activeClient?.status === "EVACUATING") evac(n.id);
-  }, [activeClient, evac, log, activeClientId, updateClient]);
 
-  const doEvac = useCallback(() => {
-    if (!activeClient?.node) { 
-      const d = "p48"; 
-      updateClient(activeClientId, { node: d, pos: { x: NM[d].x, y: NM[d].y } });
-      log(`${activeClient?.name}: Auto-placed in MC 1052.`, "warn"); 
-      evac(d); 
-    } else {
-      evac(activeClient.node);
+    // In LIVE mode, just update position (user will press evacuate button to start)
+    if (mode === "LIVE") {
+      log('✓ Starting position set. Press EVACUATE to begin.', 'success');
+    } else if (activeClient?.status === "EVACUATING") {
+      // SIMULATION mode - if already evacuating, recalculate route
+      evac(n.id);
     }
-  }, [activeClient, evac, log, activeClientId, updateClient]);
+  }, [activeClient, evac, log, activeClientId, updateClient, mode]);
 
   const doBlock = useCallback(() => {
     if (!activeClient?.route || activeClient.route.length < 3) { log("Need active route.", "warn"); return; }
@@ -2765,15 +3173,17 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {/* Mode Switcher */}
-          <select value={adminMode ? "admin" : "client"} onChange={e => setAdminMode(e.target.value === "admin")}
-            style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${adminMode ? "#ff880040" : "#1a2a40"}`, background: adminMode ? "#ff880010" : "#0a0e14", color: adminMode ? "#ffaa00" : "#7799bb", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, fontWeight: 600, cursor: "pointer", outline: "none" }}>
-            <option value="client">👤 Client View</option>
-            <option value="admin">🛡️ Admin Dashboard</option>
-          </select>
-          
-          {/* Client Selector */}
-          {!adminMode && (
+          {/* Mode Switcher (hide in LIVE mode) */}
+          {mode !== "LIVE" && (
+            <select value={adminMode ? "admin" : "client"} onChange={e => setAdminMode(e.target.value === "admin")}
+              style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${adminMode ? "#ff880040" : "#1a2a40"}`, background: adminMode ? "#ff880010" : "#0a0e14", color: adminMode ? "#ffaa00" : "#7799bb", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, fontWeight: 600, cursor: "pointer", outline: "none" }}>
+              <option value="client">👤 Client View</option>
+              <option value="admin">🛡️ Admin Dashboard</option>
+            </select>
+          )}
+
+          {/* Client Selector (hide in LIVE mode) */}
+          {!adminMode && mode !== "LIVE" && (
             <select value={activeClientId} onChange={e => setActiveClientId(Number(e.target.value))}
               style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${activeClient?.color}40`, background: "#0a0e14", color: activeClient?.color, fontFamily: "'JetBrains Mono',monospace", fontSize: 10, fontWeight: 600, cursor: "pointer", outline: "none" }}>
               {clients.map(c => (
@@ -2811,6 +3221,45 @@ export default function App() {
             </div>
           )}
 
+          {/* Connection Status (LIVE mode) */}
+          {!adminMode && mode === "LIVE" && (
+            <div style={{ padding: "4px 10px", background: isConnected ? "#00ff8808" : "#66666608", border: `1px solid ${isConnected ? "#00ff8820" : "#66666620"}`, borderRadius: 6, fontSize: 9, fontFamily: "monospace", color: isConnected ? "#00ff88" : "#666666", fontWeight: 600 }}>
+              {isConnected ? "🟢 Connected" : "🔴 Disconnected"}
+            </div>
+          )}
+
+          {/* Voice Navigation Audio Indicator (minimal, hidden when not playing) */}
+          {!adminMode && mode === "LIVE" && isPlayingAudio && (
+            <div style={{
+              padding: "4px 10px",
+              background: "#ff880008",
+              border: "1px solid #ff880020",
+              borderRadius: 6,
+              fontSize: 9,
+              fontFamily: "monospace",
+              color: "#ff8800",
+              fontWeight: 600,
+              animation: "pulse 1s infinite"
+            }}>
+              🔊 Audio Playing
+            </div>
+          )}
+
+          {/* Blockage Reporting Button (LIVE mode, when connected) */}
+          {!adminMode && mode === "LIVE" && isConnected && (
+            <button
+              onClick={() => {
+                const message = prompt('Describe the blockage:\n\n(e.g., "Fire in hallway", "Debris blocking exit", "Crowded area")');
+                if (message && socket) {
+                  socket.emit('report_blockage', { message });
+                  log(`Blockage reported: ${message}`, 'info');
+                }
+              }}
+              style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #ff4444", background: "#ff444410", color: "#ff4444", fontSize: 9, fontFamily: "monospace", cursor: "pointer", fontWeight: 700, transition: "all .2s", boxShadow: "0 0 10px #ff444420" }}>
+              🚨 Report Blockage
+            </button>
+          )}
+
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: sc, boxShadow: `0 0 8px ${sc}`, animation: activeClient?.status === "EVACUATING" ? "pulse 1s infinite" : "none" }} />
             <span style={{ color: sc, fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>{activeClient?.status || "STANDBY"}</span>
@@ -2839,6 +3288,7 @@ export default function App() {
             adminMode={adminMode}
             mode={mode}
             userHeading={userHeading}
+            otherUsers={otherUsers}
           />
           {activeClient?.route && !adminMode && <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -2849,12 +3299,42 @@ export default function App() {
               <div style={{ height: "100%", width: `${activeClient.progress / (activeClient.route.length - 1) * 100}%`, background: `linear-gradient(90deg,${activeClient.color},${activeClient.color}aa)`, transition: "width .5s" }} />
             </div>
           </div>}
+
         </div>
 
-        {/* CONTROLS GRID */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
-          {/* Room Search + Actions */}
-          <div className="card" style={{ borderRadius: 10, padding: 14 }}>
+        {/* EVACUATE BUTTON (LIVE mode only) */}
+        {mode === "LIVE" && (
+          <div style={{ marginTop: 12 }}>
+            <button
+              onClick={doEvac}
+              style={{
+                width: "100%",
+                padding: "16px 24px",
+                borderRadius: 10,
+                border: "none",
+                cursor: "pointer",
+                background: activeClient?.status === "EVACUATING"
+                  ? "linear-gradient(135deg,#cc2200,#ff4400)"
+                  : "linear-gradient(135deg,#0055cc,#0088ff)",
+                color: "#fff",
+                fontFamily: "'JetBrains Mono',monospace",
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: 1.5,
+                boxShadow: "0 4px 12px rgba(0,88,204,0.3)",
+                transition: "all 0.2s"
+              }}
+            >
+              {activeClient?.status === "EVACUATING" ? "🚨 REROUTE TO NEAREST EXIT" : "🚀 EVACUATE NOW"}
+            </button>
+          </div>
+        )}
+
+        {/* CONTROLS GRID (hide in LIVE mode) */}
+        {mode !== "LIVE" && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+            {/* Room Search + Actions */}
+            <div className="card" style={{ borderRadius: 10, padding: 14 }}>
             <div style={{ color: "#8899bb", fontSize: 10, fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>📍 Find Your Room</div>
             <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search room (e.g. 1052, 1047...)" style={{ width: "100%", padding: "8px 12px", borderRadius: 7, border: "1px solid #1a2a40", background: "#0a0e14", color: "#c0d0e0", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, outline: "none", marginBottom: 6 }} />
@@ -2914,7 +3394,8 @@ export default function App() {
             </div>
           </div>
 
-        </div>
+          </div>
+        )}
 
         {/* ═══════════════════════════════════════════════════════════
             ADMIN DASHBOARD - Emergency Management & User Monitoring
@@ -3016,7 +3497,7 @@ export default function App() {
                             {client.route && <> · Exit: <span style={{ color: "#00aaff" }}>{exitNode?.label || "Unknown"}</span></>}
                           </div>
                         </div>
-                        {isEvacuating && (
+                        {isEvacuating && client.route && client.route.length > 0 && (
                           <div style={{ textAlign: "right" }}>
                             <div style={{ color: statusColor, fontSize: 10, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }}>
                               {Math.round((client.progress / (client.route.length - 1)) * 100)}%
@@ -3027,9 +3508,9 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                      
+
                       {/* Progress bar */}
-                      {isEvacuating && (
+                      {isEvacuating && client.route && client.route.length > 0 && (
                         <div style={{ height: 3, background: "#1a2a40", borderRadius: 2, overflow: "hidden", marginBottom: selectedUser === client.id ? 8 : 0 }}>
                           <div style={{ height: "100%", width: `${(client.progress / (client.route.length - 1)) * 100}%`, background: `linear-gradient(90deg, ${client.color}, ${client.color}aa)`, transition: "width .5s" }} />
                         </div>
