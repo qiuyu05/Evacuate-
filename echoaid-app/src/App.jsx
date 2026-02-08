@@ -705,6 +705,13 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
         </circle>
       </g>}
 
+    {/* Debugging Label */}
+    {userPos && (
+    <text x="500" y="500" fill="yellow" fontSize="14" fontWeight="bold">
+        X: {userPos.x.toFixed(0)} Y: {userPos.y.toFixed(0)}
+    </text>
+    )}
+
       <text x="18" y="810" fill="#1a2a4050" fontSize="7" fontFamily="monospace">MC Building No.17 — 1st Floor — University of Waterloo — EchoAid GeoJSON</text>
     </svg>
   );
@@ -784,7 +791,7 @@ export default function App() {
     simRef.current = setInterval(() => {
       brain.tick();
       refreshBrain();
-    }, 3000);
+    }, 5000);
     return () => clearInterval(simRef.current);
   }, [refreshBrain]);
 
@@ -1283,3 +1290,6 @@ export default function App() {
     </div>
   );
 }
+
+
+
