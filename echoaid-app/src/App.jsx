@@ -1441,7 +1441,7 @@ const EDGES_BASE = [
 ];
 
 // ── AUTO-GENERATE INTERMEDIATE WAYPOINTS ──
-// Creates smooth paths by adding waypoints every WAYPOINT_INTERVAL units along edges
+// First pass: Create initial waypoints along edges
 const WAYPOINT_INTERVAL = 80; // SVG units between waypoints
 const EXTRA = [];
 const EDGES = [];
@@ -1452,7 +1452,6 @@ EDGES_BASE.forEach(([nodeA, nodeB], edgeIdx) => {
   const nB = NAV_RAW.find(n => n.id === nodeB);
 
   if (!nA || !nB) {
-    // If either node doesn't exist, just keep the original edge
     EDGES.push([nodeA, nodeB]);
     return;
   }
@@ -1461,19 +1460,16 @@ EDGES_BASE.forEach(([nodeA, nodeB], edgeIdx) => {
   const dy = nB.y - nA.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
 
-  // If edge is short, don't add waypoints
   if (dist < WAYPOINT_INTERVAL * 1.5) {
     EDGES.push([nodeA, nodeB]);
     return;
   }
 
-  // Calculate number of intermediate waypoints needed
   const numWaypoints = Math.floor(dist / WAYPOINT_INTERVAL);
   const waypoints = [];
 
-  // Generate intermediate waypoints
   for (let i = 1; i <= numWaypoints; i++) {
-    const t = i / (numWaypoints + 1); // Interpolation factor
+    const t = i / (numWaypoints + 1);
     const wpId = `pw${waypointCounter++}`;
     const wpX = nA.x + dx * t;
     const wpY = nA.y + dy * t;
@@ -1482,13 +1478,13 @@ EDGES_BASE.forEach(([nodeA, nodeB], edgeIdx) => {
       id: wpId,
       x: wpX,
       y: wpY,
-      label: `·`, // Small dot label
+      label: `·`,
       feat: {
         id: waypointCounter,
         type: "WAYPOINT",
         hallway: true,
         color: "green",
-        x: wpX / 0.4 + 1309, // Convert back to GeoJSON for consistency
+        x: wpX / 0.4 + 1309,
         y: wpY / 0.4 + 330.5,
       }
     });
@@ -1496,7 +1492,6 @@ EDGES_BASE.forEach(([nodeA, nodeB], edgeIdx) => {
     waypoints.push(wpId);
   }
 
-  // Connect nodeA -> waypoints -> nodeB
   let prev = nodeA;
   for (const wp of waypoints) {
     EDGES.push([prev, wp]);
@@ -1504,6 +1499,123 @@ EDGES_BASE.forEach(([nodeA, nodeB], edgeIdx) => {
   }
   EDGES.push([prev, nodeB]);
 });
+
+// ── SECOND PASS: ADD 100 ADDITIONAL HALLWAY NODES ──
+// Distribute them evenly along ALL existing hallway edges
+const ADDITIONAL_WAYPOINTS = 500;
+
+// Collect all hallway-to-hallway edges with their lengths
+const hallwayEdges = [];
+EDGES.forEach(([a, b]) => {
+  const nA = NAV_RAW.find(n => n.id === a) || EXTRA.find(n => n.id === a);
+  const nB = NAV_RAW.find(n => n.id === b) || EXTRA.find(n => n.id === b);
+  
+  if (!nA || !nB) return;
+  
+  // Only consider hallway-to-hallway connections
+  const isAHallway = nA.feat?.hallway === true || nA.feat?.type === "WAYPOINT" || nA.feat?.color === "green";
+  const isBHallway = nB.feat?.hallway === true || nB.feat?.type === "WAYPOINT" || nB.feat?.color === "green";
+  
+  if (isAHallway && isBHallway) {
+    const dx = nB.x - nA.x;
+    const dy = nB.y - nA.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    if (dist > 20) {
+      hallwayEdges.push({ a, b, nA, nB, dist, dx, dy });
+    }
+  }
+});
+
+// Calculate total hallway length
+const totalHallwayLength = hallwayEdges.reduce((sum, edge) => sum + edge.dist, 0);
+
+// Distribute 100 waypoints proportionally by edge length
+const waypointsToAdd = [];
+let remainingWaypoints = ADDITIONAL_WAYPOINTS;
+
+hallwayEdges.forEach((edge, idx) => {
+  const proportion = edge.dist / totalHallwayLength;
+  let count = Math.round(proportion * ADDITIONAL_WAYPOINTS);
+  
+  if (idx === hallwayEdges.length - 1) {
+    count = remainingWaypoints;
+  } else {
+    remainingWaypoints -= count;
+  }
+  
+  if (count > 0) {
+    waypointsToAdd.push({ ...edge, count });
+  }
+});
+
+// Generate and insert the additional waypoints
+const newEdges = [];
+const processedEdges = new Set();
+
+EDGES.forEach(([a, b]) => {
+  const edgeKey = `${a}-${b}`;
+  const reverseKey = `${b}-${a}`;
+  
+  const edgeToProcess = waypointsToAdd.find(e => 
+    (e.a === a && e.b === b) || (e.a === b && e.b === a)
+  );
+  
+  if (edgeToProcess && !processedEdges.has(edgeKey) && !processedEdges.has(reverseKey)) {
+    processedEdges.add(edgeKey);
+    
+    const { nA, nB, dx, dy, count } = edgeToProcess;
+    const isReversed = edgeToProcess.a === b;
+    const startNode = isReversed ? nB : nA;
+    const endNode = isReversed ? nA : nB;
+    const actualDx = isReversed ? -dx : dx;
+    const actualDy = isReversed ? -dy : dy;
+    
+    const newWaypoints = [];
+    
+    for (let i = 1; i <= count; i++) {
+      const t = i / (count + 1);
+      const wpId = `ph${waypointCounter++}`;
+      const wpX = startNode.x + actualDx * t;
+      const wpY = startNode.y + actualDy * t;
+      
+      EXTRA.push({
+        id: wpId,
+        x: wpX,
+        y: wpY,
+        label: `•`,
+        feat: {
+          id: waypointCounter,
+          type: "WAYPOINT",
+          hallway: true,
+          color: "green",
+          priority: true,
+          x: wpX / 0.4 + 1309,
+          y: wpY / 0.4 + 330.5,
+        }
+      });
+      
+      newWaypoints.push(wpId);
+    }
+    
+    let prev = a;
+    for (const wp of newWaypoints) {
+      newEdges.push([prev, wp]);
+      prev = wp;
+    }
+    newEdges.push([prev, b]);
+    
+  } else {
+    newEdges.push([a, b]);
+  }
+});
+
+// Replace EDGES with new segmented edges
+EDGES.length = 0;
+EDGES.push(...newEdges);
+
+console.log(`✅ Generated ${ADDITIONAL_WAYPOINTS} additional hallway waypoints`);
+console.log(`📊 Total waypoints: ${EXTRA.length} across ${EDGES.length} edge segments`);
 
 const NODES = [...NAV_RAW, ...EXTRA];
 const NM = {}; NODES.forEach(n => NM[n.id] = n);
@@ -1844,7 +1956,7 @@ const brain = (() => {
 })();
 
 /* ─── SVG FLOOR PLAN COMPONENT ─── */
-const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadData, onClick, people, hoveredRoom, setHoveredRoom, clients, adminMode }) => {
+const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadData, onClick, people, hoveredRoom, setHoveredRoom, clients, adminMode, mode, userHeading }) => {
   const rp = route ? route.map(id => NM[id]).filter(Boolean) : [];
 
   // Convert wall segments to SVG space
@@ -1880,10 +1992,17 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
       })}
 
       {/* Intermediate Waypoints (auto-generated along edges) */}
-      {EXTRA.map(wp => (
-        <circle key={wp.id} cx={wp.x} cy={wp.y} r="2"
-          fill="transparent" opacity="0" stroke="transparent" strokeWidth="0.5"/>
-      ))}
+      {EXTRA.map(wp => {
+        const isPriority = wp.feat?.priority === true; // Check if it's one of the 100 new waypoints
+        return (
+          <circle key={wp.id} cx={wp.x} cy={wp.y} r={isPriority ? "3" : "2"}
+            fill={isPriority ? "#00ff88" : "#00ff8850"}
+            opacity= "0"
+            stroke={"transparent"} 
+            strokeWidth={0}>
+          </circle>
+        );
+      })}
 
       {/* Rooms */}
       {ROOMS.map(r => {
@@ -2033,7 +2152,7 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
       ))}
 
       {/* User position (Single Client Mode) */}
-      {!adminMode && userPos && <g filter="url(#gs)">
+      {!adminMode && userPos && mode === "SIMULATION" && <g filter="url(#gs)">
         <circle cx={userPos.x} cy={userPos.y} r="16" fill="#00aaff08" stroke="#00aaff" strokeWidth=".8">
           <animate attributeName="r" values="12;22;12" dur="2s" repeatCount="indefinite"/>
           <animate attributeName="opacity" values=".6;.12;.6" dur="2s" repeatCount="indefinite"/>
@@ -2041,6 +2160,18 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
         <circle cx={userPos.x} cy={userPos.y} r="6" fill="#00ccff"/>
         <circle cx={userPos.x} cy={userPos.y} r="2.5" fill="#fff"/>
       </g>}
+
+      {/* User position with directional arrow (LIVE Mode) */}
+      {!adminMode && userPos && mode === "LIVE" && (
+        <g transform={`translate(${userPos.x}, ${userPos.y}) rotate(${userHeading || 0})`} filter="url(#gs)">
+          <circle r="16" fill="#00ff8808" stroke="#00ff88" strokeWidth=".8">
+            <animate attributeName="r" values="12;22;12" dur="2s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values=".6;.12;.6" dur="2s" repeatCount="indefinite"/>
+          </circle>
+          <circle r="6" fill="#00ff88"/>
+          <path d="M0 -10 L6 4 L0 1 L-6 4 Z" fill="#fff" stroke="#00ff88" strokeWidth="0.5" />
+        </g>
+      )}
 
       {/* Destination (Single Client Mode) */}
       {!adminMode && route && rp.length > 0 && <g filter="url(#gl)">
@@ -2071,6 +2202,10 @@ export default function App() {
   
   const [clients, setClients] = useState(initialClients);
   const [activeClientId, setActiveClientId] = useState(1);
+  const [mode, setMode] = useState("SIMULATION"); // SIMULATION or LIVE
+  const [sensorPermission, setSensorPermission] = useState(false);
+  const [requestingSensors, setRequestingSensors] = useState(false);
+  const [userHeading, setUserHeading] = useState(0);
   const [wifi, setWifi] = useState(true);
   const [logs, setLogs] = useState([]);
   const [listening, setListening] = useState(false);
@@ -2089,6 +2224,8 @@ export default function App() {
   const recRef = useRef(null);
   const logRef = useRef(null);
   const simRef = useRef(null);
+  const headingRef = useRef(0);
+  const lastStepTime = useRef(0);
   
   const activeClient = clients.find(c => c.id === activeClientId);
   const updateClient = useCallback((id, updates) => {
@@ -2111,6 +2248,301 @@ export default function App() {
     setPeople(brain.getUserPositions());
   }, []);
 
+  // Enable sensors for live tracking (iOS requires permission)
+  const enableSensors = useCallback(async () => {
+    console.log("🔓 enableSensors called!");
+    setRequestingSensors(true);
+    log("🔓 Requesting sensor permissions...", "info");
+
+    // Check if DeviceOrientationEvent exists
+    if (typeof DeviceOrientationEvent === 'undefined') {
+      log("❌ Device sensors not available on this browser", "error");
+      alert("⚠️ Your browser doesn't support motion sensors. Try using Safari on iOS or Chrome on Android.");
+      setRequestingSensors(false);
+      return;
+    }
+
+    // iOS 13+ requires explicit permission
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        log("📱 iOS detected - requesting permission...", "info");
+        const response = await DeviceOrientationEvent.requestPermission();
+        if (response === 'granted') {
+          setSensorPermission(true);
+          log("✅ Sensors enabled! You can now use LIVE mode.", "success");
+          speak("Sensors enabled.");
+        } else {
+          log("❌ Sensor permission denied. Please allow motion & orientation access.", "error");
+          alert("⚠️ Permission denied. Please allow motion & orientation access in your browser settings.");
+        }
+      } catch (error) {
+        log(`❌ Error requesting sensors: ${error.message}`, "error");
+        alert(`⚠️ Error: ${error.message}\n\nMake sure you're using HTTPS and try again.`);
+        console.error("Sensor permission error:", error);
+      } finally {
+        setRequestingSensors(false);
+      }
+    } else {
+      // Android/Desktop - no permission needed
+      setSensorPermission(true);
+      log("✅ Sensors ready! (No permission required on this device)", "success");
+      speak("Sensors ready.");
+      setRequestingSensors(false);
+    }
+  }, [log]);
+
+  // Find nearest node to a given position
+  const findNearestNode = useCallback((x, y, route = null) => {
+    // If we have a route, prefer nodes along that route
+    const searchNodes = route ? route.map(id => NM[id]).filter(Boolean) : NODES;
+    let minDist = Infinity;
+    let nearest = null;
+    for (const node of searchNodes) {
+      const d = Math.sqrt((node.x - x) ** 2 + (node.y - y) ** 2);
+      if (d < minDist) {
+        minDist = d;
+        nearest = node;
+      }
+    }
+    return nearest;
+  }, []);
+
+  // LIVE mode sensor tracking
+  useEffect(() => {
+    if (mode !== "LIVE" || !sensorPermission || activeClient.status !== "EVACUATING") return;
+
+    // ═══════════════════════════════════════════════════════
+    // 🎛️  SENSITIVITY CONTROLS - Edit these values:
+    // ═══════════════════════════════════════════════════════
+    const STEP_SIZE = 20;          // Distance moved per step (pixels)
+                                   // HIGHER = faster movement
+                                   // Default: 6 | Recommended: 8-15 for faster response
+
+    const STEP_THRESHOLD = 1;    // Acceleration change needed to detect a step
+                                   // LOWER = more sensitive (detects lighter movements)
+                                   // Default: 10 | For WALKING: 2-4 (tapping needs higher)
+
+    const DEBOUNCE_MS = 200;       // Minimum time between steps (milliseconds)
+                                   // LOWER = more responsive (detects steps faster)
+                                   // Default: 300 | For WALKING: 250-400 (matches walking rhythm)
+
+    const HEADING_OFFSET = -40;    // Compass calibration (degrees)
+                                   // Adjust if your arrow points the wrong direction
+    // ═══════════════════════════════════════════════════════
+
+    let lastAcceleration = 0;
+    let sampleCount = 0; // For debug logging
+
+    const handleMotion = (event) => {
+      const acc = event.accelerationIncludingGravity;
+      if (!acc) return;
+    
+      const magnitude = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2);
+      const delta = Math.abs(magnitude - lastAcceleration);
+      lastAcceleration = magnitude;
+    
+      // Debug: Log acceleration every 20 samples to see what's happening
+      sampleCount++;
+      if (sampleCount % 20 === 0) {
+        console.log(`📊 Accel delta: ${delta.toFixed(2)} (threshold: ${STEP_THRESHOLD})`);
+      }
+    
+      if (delta > STEP_THRESHOLD) {
+        console.log(`✅ STEP DETECTED! Delta: ${delta.toFixed(2)}`); // Debug log
+        const now = Date.now();
+        if (now - lastStepTime.current < DEBOUNCE_MS) return; // Debounce steps
+        lastStepTime.current = now;
+    
+        setClients(prevClients => {
+          return prevClients.map(client => {
+            if (client.id !== activeClientId) return client;
+            if (!client.pos || !client.route) return client;
+    
+            // ═══════════════════════════════════════════════════════
+            // 🎯 HALLWAY-WAYPOINT-ONLY MOVEMENT
+            // User can ONLY move to green waypoint nodes
+            // ═══════════════════════════════════════════════════════
+    
+            // Calculate intended direction based on heading
+            const heading = headingRef.current + HEADING_OFFSET;
+            const rad = (heading * Math.PI) / 180;
+            const dirX = Math.sin(rad);
+            const dirY = -Math.cos(rad);
+    
+            // Find all hallway waypoint nodes (the 526 green nodes)
+            const hallwayWaypoints = NODES.filter(n => 
+              n.feat?.hallway === true || 
+              n.feat?.type === "WAYPOINT" || 
+              n.feat?.color === "green"
+            );
+    
+            // Get current waypoint node
+            const currentNode = NM[client.node] || client.pos;
+            
+            // Find nearest waypoint in the direction of movement
+            let bestNode = null;
+            let bestScore = -Infinity;
+            const SEARCH_RADIUS = 100; // Only consider waypoints within 100px
+    
+            for (const waypoint of hallwayWaypoints) {
+              // Skip current position
+              if (waypoint.id === client.node) continue;
+    
+              // Vector from current position to waypoint
+              const toWaypointX = waypoint.x - currentNode.x;
+              const toWaypointY = waypoint.y - currentNode.y;
+              const distance = Math.sqrt(toWaypointX ** 2 + toWaypointY ** 2);
+    
+              // Skip if too far
+              if (distance > SEARCH_RADIUS) continue;
+    
+              // Calculate alignment with heading (dot product)
+              const alignment = (toWaypointX * dirX + toWaypointY * dirY) / distance;
+    
+              // Score = alignment (prefer nodes in direction) - distance penalty
+              const score = alignment * 100 - distance * 0.5;
+    
+              if (score > bestScore && alignment > 0.3) { // Must be roughly in the right direction
+                bestScore = score;
+                bestNode = waypoint;
+              }
+            }
+    
+            // If we found a valid waypoint to move to, snap to it
+            if (bestNode) {
+              console.log(`🎯 Moving to waypoint ${bestNode.id} at (${Math.round(bestNode.x)}, ${Math.round(bestNode.y)})`);
+    
+              // Update position to the waypoint
+              const newPos = { x: bestNode.x, y: bestNode.y };
+    
+              // Track progress along route
+              const currentProgress = client.progress || 0;
+              let updatedProgress = currentProgress;
+    
+              // Check if this waypoint is on our route
+              if (client.route) {
+                const waypointIndex = client.route.indexOf(bestNode.id);
+                if (waypointIndex > currentProgress) {
+                  updatedProgress = waypointIndex;
+                  log(`📍 Progress: ${updatedProgress}/${client.route.length - 1}`, "info");
+    
+                  // Halfway point feedback
+                  if (updatedProgress === Math.floor(client.route.length / 2)) {
+                    speak("Halfway there.");
+                  }
+                }
+              }
+    
+              // Check if reached destination
+              if (updatedProgress >= client.route.length - 1) {
+                log(`✅ ${client.name} reached safety!`, "success");
+                speak("You are safe.");
+                return { ...client, status: "SAFE", progress: updatedProgress };
+              }
+    
+              return {
+                ...client,
+                pos: newPos,
+                node: bestNode.id,
+                progress: updatedProgress
+              };
+            } else {
+              // No valid waypoint found - stay in place
+              console.log(`⚠️ No valid waypoint in direction ${heading.toFixed(0)}°`);
+              return client;
+            }
+
+            // Track progress by checking proximity to next waypoint on route
+            const currentProgress = client.progress || 0;
+            let updatedProgress = currentProgress;
+
+            // ═══════════════════════════════════════════════════════
+            // 🎯 HALLWAY-ONLY WAYPOINT TRACKING
+            // Only advance progress at corridor waypoints, skip room nodes
+            // ═══════════════════════════════════════════════════════
+
+            // Helper: Check if a node is a hallway waypoint (not a room)
+            const isHallwayNode = (nodeId) => {
+              // Corridor waypoint prefixes (from EXTRA array - corridor centerlines)
+              const hallwayPrefixes = ['wc_', 'nc_', 'sc_', 'cc_', 'mv_', 'ev_', 'fe_', 'ax_', 'top_', 'sw_', 'se_'];
+              if (hallwayPrefixes.some(prefix => nodeId.startsWith(prefix))) {
+                return true;
+              }
+              // Check if node has hallway property (from RAW data with hallway:true)
+              const node = NM[nodeId];
+              return node?.feat?.hallway === true;
+            };
+
+            if (currentProgress < client.route.length - 1) {
+              // Find next HALLWAY node in route (skip over room nodes)
+              let nextHallwayIndex = currentProgress + 1;
+              while (nextHallwayIndex < client.route.length && !isHallwayNode(client.route[nextHallwayIndex])) {
+                nextHallwayIndex++;
+              }
+
+              // Check distance to next hallway waypoint
+              if (nextHallwayIndex < client.route.length) {
+                const nextNodeId = client.route[nextHallwayIndex];
+                const nextNode = NM[nextNodeId];
+
+                if (nextNode) {
+                  const distanceToNext = Math.sqrt(
+                    (newX - nextNode.x) ** 2 + (newY - nextNode.y) ** 2
+                  );
+
+                  // Advance progress when within radius of next HALLWAY waypoint
+                  const WAYPOINT_RADIUS = 30; // Larger radius since we skip room nodes
+                  if (distanceToNext < WAYPOINT_RADIUS) {
+                    updatedProgress = nextHallwayIndex; // Jump directly to hallway node
+
+                    // Count hallway waypoints for better progress feedback
+                    const hallwaysReached = client.route.slice(0, nextHallwayIndex + 1).filter(id => isHallwayNode(id)).length;
+                    const totalHallways = client.route.filter(id => isHallwayNode(id)).length;
+
+                    // Provide audio feedback at halfway point
+                    if (hallwaysReached === Math.floor(totalHallways / 2)) {
+                      speak("Halfway there.");
+                    }
+
+                    log(`📍 Hallway waypoint ${hallwaysReached}/${totalHallways} (${nextNodeId})`, "info");
+                  }
+                }
+              }
+            }
+
+            // Check if reached final destination
+            if (updatedProgress >= client.route.length - 1) {
+              log(`✅ ${client.name} reached safety!`, "success");
+              speak("You are safe.");
+              return { ...client, status: "SAFE", progress: updatedProgress };
+            }
+
+            // Update position smoothly - no snapping, just continuous movement!
+            return {
+              ...client,
+              pos: { x: newX, y: newY },
+              progress: updatedProgress
+            };
+          });
+        });
+      }
+    };
+
+    const handleOrientation = (e) => {
+      const compass = e.webkitCompassHeading || Math.abs(e.alpha - 360);
+      headingRef.current = compass;
+      setUserHeading(compass);
+    };
+
+    window.addEventListener('devicemotion', handleMotion);
+    window.addEventListener('deviceorientation', handleOrientation);
+
+    return () => {
+      window.removeEventListener('devicemotion', handleMotion);
+      window.removeEventListener('deviceorientation', handleOrientation);
+    };
+  }, [mode, sensorPermission, activeClient?.status, activeClientId, findNearestNode, log]);
+
   // Initialize
   useEffect(() => {
     brain.seed(30); // 30 simulated evacuees for richer demo
@@ -2125,14 +2557,15 @@ export default function App() {
     log(`📊 Exit distribution → ${distStr}`, "info");
   }, []);
 
-  // Simulation tick — move simulated users every 3s
+  // Simulation tick — move simulated users every 5s (only in SIMULATION mode)
   useEffect(() => {
+    if (mode !== "SIMULATION") return;
     simRef.current = setInterval(() => {
       brain.tick();
       refreshBrain();
-    }, 5000);
+    }, 2000);
     return () => clearInterval(simRef.current);
-  }, [refreshBrain]);
+  }, [refreshBrain, mode]);
 
   const evac = useCallback((nid, clientId = activeClientId) => {
     const p = wifi ? brain.route(nid, "main") : brain.localRoute(nid);
@@ -2271,11 +2704,13 @@ export default function App() {
     r.start(); recRef.current = r; setListening(true); log("🎤 Listening...");
   }, [doEvac, doBlock, clearAll, doSafe, log]);
 
-  // Evacuation step timer - moves each evacuating client
+  // Evacuation step timer - moves each evacuating client (SIMULATION mode only)
   useEffect(() => {
     const intervals = {};
     clients.forEach(client => {
       if (client.status !== "EVACUATING" || !client.route || client.route.length < 2) return;
+      // Skip active client in LIVE mode (they use sensors instead)
+      if (mode === "LIVE" && client.id === activeClientId) return;
       intervals[client.id] = setInterval(() => {
         const newProgress = client.progress + 1;
         if (newProgress >= client.route.length) {
@@ -2298,12 +2733,12 @@ export default function App() {
             speak("Halfway there.");
           }
         }
-      }, 1800);
+      }, 200);
     });
     return () => {
       Object.values(intervals).forEach(iv => clearInterval(iv));
     };
-  }, [clients, activeClientId, updateClient]);
+  }, [clients, activeClientId, updateClient, mode]);
 
   // Room search
   const filteredRooms = searchQuery
@@ -2346,7 +2781,36 @@ export default function App() {
               ))}
             </select>
           )}
-          
+
+          {/* Mode Toggle: SIMULATION vs LIVE */}
+          {!adminMode && (
+            <div style={{ display: "flex", gap: 4, background: "#0a0e14", borderRadius: 6, padding: 3, border: "1px solid #1a2a40" }}>
+              <button onClick={() => setMode("SIMULATION")}
+                style={{ padding: "4px 10px", borderRadius: 4, border: "none", background: mode === "SIMULATION" ? "#00aaff20" : "transparent", color: mode === "SIMULATION" ? "#00aaff" : "#556677", fontSize: 9, fontFamily: "monospace", cursor: "pointer", fontWeight: mode === "SIMULATION" ? 700 : 400, transition: "all .2s" }}>
+                🤖 SIM
+              </button>
+              <button onClick={() => setMode("LIVE")}
+                style={{ padding: "4px 10px", borderRadius: 4, border: "none", background: mode === "LIVE" ? "#00ff8820" : "transparent", color: mode === "LIVE" ? "#00ff88" : "#556677", fontSize: 9, fontFamily: "monospace", cursor: "pointer", fontWeight: mode === "LIVE" ? 700 : 400, transition: "all .2s" }}>
+                📱 LIVE
+              </button>
+            </div>
+          )}
+
+          {/* Enable Sensors Button */}
+          {!adminMode && mode === "LIVE" && !sensorPermission && (
+            <button onClick={enableSensors} disabled={requestingSensors}
+              style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #ff880040", background: requestingSensors ? "#ff880020" : "#ff880010", color: requestingSensors ? "#ffaa0080" : "#ffaa00", fontSize: 9, fontFamily: "monospace", cursor: requestingSensors ? "wait" : "pointer", fontWeight: 600, animation: requestingSensors ? "none" : "pulse 2s infinite" }}>
+              {requestingSensors ? "⏳ Requesting..." : "🔓 Unlock Sensors"}
+            </button>
+          )}
+
+          {/* Heading Display (LIVE mode) */}
+          {!adminMode && mode === "LIVE" && sensorPermission && (
+            <div style={{ padding: "4px 10px", background: "#0a0e14", border: "1px solid #1a2a40", borderRadius: 6, fontSize: 9, fontFamily: "monospace", color: "#7799bb" }}>
+              🧭 {userHeading.toFixed(0)}°
+            </div>
+          )}
+
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: sc, boxShadow: `0 0 8px ${sc}`, animation: activeClient?.status === "EVACUATING" ? "pulse 1s infinite" : "none" }} />
             <span style={{ color: sc, fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>{activeClient?.status || "STANDBY"}</span>
@@ -2360,19 +2824,21 @@ export default function App() {
       <div style={{ padding: "14px 20px", maxWidth: 1600, margin: "0 auto" }}>
         {/* MAP */}
         <div className="map-shell" style={{ borderRadius: 12, padding: 12, marginBottom: 14, maxWidth: "900px", maxHeight: "600px", margin: "0 auto 14px" }}>
-          <FloorPlan 
-            userPos={adminMode ? null : activeClient?.pos} 
-            route={adminMode ? null : activeClient?.route} 
-            blockades={blocks} 
-            congestion={cong} 
-            edgeCong={eCong} 
-            exitLoadData={exLoads} 
-            onClick={onNode} 
-            people={people} 
-            hoveredRoom={hoveredRoom} 
+          <FloorPlan
+            userPos={adminMode ? null : activeClient?.pos}
+            route={adminMode ? null : activeClient?.route}
+            blockades={blocks}
+            congestion={cong}
+            edgeCong={eCong}
+            exitLoadData={exLoads}
+            onClick={onNode}
+            people={people}
+            hoveredRoom={hoveredRoom}
             setHoveredRoom={setHoveredRoom}
             clients={clients}
             adminMode={adminMode}
+            mode={mode}
+            userHeading={userHeading}
           />
           {activeClient?.route && !adminMode && <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -2403,6 +2869,21 @@ export default function App() {
                 ))}
               </div>
             )}
+
+            {/* Mode Status Info */}
+            {!adminMode && (
+              <div style={{ marginTop: 8, marginBottom: 8, padding: "8px 10px", background: mode === "LIVE" ? "#00ff8808" : "#00aaff08", border: `1px solid ${mode === "LIVE" ? "#00ff8820" : "#00aaff20"}`, borderRadius: 6 }}>
+                <div style={{ color: mode === "LIVE" ? "#00ff88" : "#00aaff", fontSize: 9, fontFamily: "monospace", fontWeight: 600, marginBottom: 3 }}>
+                  {mode === "LIVE" ? "📱 LIVE TRACKING MODE" : "🤖 SIMULATION MODE"}
+                </div>
+                <div style={{ color: "#556677", fontSize: 8, fontFamily: "monospace", lineHeight: 1.4 }}>
+                  {mode === "LIVE"
+                    ? "Your phone's sensors track real movement. Walk to follow the route using your actual steps and direction."
+                    : "Auto-simulated movement along the evacuation route. Your position updates automatically every 5 seconds."}
+                </div>
+              </div>
+            )}
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
               <button onClick={doEvac} style={{ padding: 12, borderRadius: 8, border: "none", cursor: "pointer", background: activeClient?.status === "EVACUATING" ? "linear-gradient(135deg,#cc2200,#ff4400)" : "linear-gradient(135deg,#0055cc,#0088ff)", color: "#fff", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>
                 {activeClient?.status === "EVACUATING" ? "🚨 REROUTE" : "🚀 EVACUATE"}
