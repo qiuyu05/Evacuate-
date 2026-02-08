@@ -1852,52 +1852,9 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
     x1: tx(x1), y1: ty(y1), x2: tx(x2), y2: ty(y2)
   })), []);
 
-  // Click handler to show coordinates
-  // const handleSvgClick = (e) => {
-  //   const svg = e.currentTarget;
-  //   const pt = svg.createSVGPoint();
-  //   pt.x = e.clientX;
-  //   pt.y = e.clientY;
-  //   const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
-
-  //   // Convert back to GeoJSON coordinates (inverse transform)
-  //   const geoX = svgP.x / S + OX;
-  //   const geoY = svgP.y / S + OY;
-
-  //   // Check if near any room or exit
-  //   let nearbyLabel = "";
-  //   const searchRadius = 15; // pixels in SVG space
-
-  //   // Check rooms
-  //   for (const room of ROOMS) {
-  //     const dist = Math.sqrt((room.sx - svgP.x) ** 2 + (room.sy - svgP.y) ** 2);
-  //     if (dist < searchRadius) {
-  //       nearbyLabel = `Room ${room.label}`;
-  //       break;
-  //     }
-  //   }
-
-  //   // Check exits if no room found
-  //   if (!nearbyLabel) {
-  //     for (const exit of EXITS) {
-  //       const dist = Math.sqrt((exit.sx - svgP.x) ** 2 + (exit.sy - svgP.y) ** 2);
-  //       if (dist < searchRadius) {
-  //         nearbyLabel = exit.label;
-  //         break;
-  //       }
-  //     }
-  //   }
-
-  //   const labelInfo = nearbyLabel ? `\nNearest: ${nearbyLabel}` : "";
-  //   console.log(`🎯 Clicked coordinates:\n  SVG: (${svgP.x.toFixed(1)}, ${svgP.y.toFixed(1)})\n  GeoJSON: (${geoX.toFixed(1)}, ${geoY.toFixed(1)})${labelInfo}`);
-  //   alert(`Clicked Coordinates:\n\nSVG: (${svgP.x.toFixed(1)}, ${svgP.y.toFixed(1)})\nGeoJSON: (${geoX.toFixed(1)}, ${geoY.toFixed(1)})${labelInfo}\n\nUse the GeoJSON coordinates for exit placement.`);
-  // };
-
   return (
     <svg viewBox="-150 0 1350 1120" preserveAspectRatio="xMidYMid meet"
-      style={{ width: "100%", height: "100%", background: "#060a10", borderRadius: 12, display: "block" }}
-      // onClick={handleSvgClick}
-      >
+      style={{ width: "100%", height: "100%", background: "#060a10", borderRadius: 12, display: "block" }}>
       <defs>
         <filter id="gl"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
         <filter id="gs"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -1933,12 +1890,7 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
         const isHovered = hoveredRoom === r.label;
         return (
           <g key={r.id} style={{ cursor: "pointer" }}
-            onClick={(e) => {
-              // Show coordinates on click (Shift+Click for alert dialog)
-              console.log(`Room ${r.label}: Original coords (${r.x}, ${r.y}) → SVG coords (${r.sx.toFixed(1)}, ${r.sy.toFixed(1)})`);
-              if (e.shiftKey) {
-                alert(`Room ${r.label}\n\nOriginal coordinates:\nx: ${r.x}\ny: ${r.y}\n\nSVG coordinates:\nx: ${r.sx.toFixed(1)}\ny: ${r.sy.toFixed(1)}`);
-              }
+            onClick={() => {
               onClick(NAV_RAW.find(n => n.feat?.id === r.id));
             }}
             onMouseEnter={() => setHoveredRoom(r.label)}
@@ -1952,14 +1904,7 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
 
       {/* Exits */}
       {EXITS.map(e => (
-        <g key={e.id} style={{ cursor: "pointer" }}
-          onClick={(ev) => {
-            // Show coordinates on click (Shift+Click for alert dialog)
-            console.log(`Exit ${e.label}: Original coords (${e.x}, ${e.y}) → SVG coords (${e.sx.toFixed(1)}, ${e.sy.toFixed(1)})`);
-            if (ev.shiftKey) {
-              alert(`Exit: ${e.label}\n\nOriginal coordinates:\nx: ${e.x}\ny: ${e.y}\n\nSVG coordinates:\nx: ${e.sx.toFixed(1)}\ny: ${e.sy.toFixed(1)}`);
-            }
-          }}>
+        <g key={e.id} style={{ cursor: "pointer" }}>
           <circle cx={e.sx} cy={e.sy} r="10" fill="#FF0000" stroke="#008800" strokeWidth="1.5"/>
           <text x={e.sx} y={e.sy-13} textAnchor="middle" fill="#FF0000" fontSize="6" fontFamily="monospace" fontWeight="bold">EXIT</text>
         </g>
