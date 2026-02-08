@@ -1844,7 +1844,7 @@ const brain = (() => {
 })();
 
 /* ─── SVG FLOOR PLAN COMPONENT ─── */
-const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadData, onClick, people, hoveredRoom, setHoveredRoom }) => {
+const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadData, onClick, people, hoveredRoom, setHoveredRoom, clients, adminMode }) => {
   const rp = route ? route.map(id => NM[id]).filter(Boolean) : [];
 
   // Convert wall segments to SVG space
@@ -2039,16 +2039,55 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
         );
       })}
 
-      {/* Route */}
-      {rp.length > 1 && <g filter="url(#gs)">
+      {/* Client Routes in Admin Mode */}
+      {adminMode && clients && clients.map(client => {
+        const clientRoute = client.route ? client.route.map(id => NM[id]).filter(Boolean) : [];
+        if (clientRoute.length < 2) return null;
+        return (
+          <g key={`cr${client.id}`} filter="url(#gs)">
+            <polyline 
+              points={clientRoute.map(p => `${p.x},${p.y}`).join(" ")} 
+              fill="none" 
+              stroke={client.color} 
+              strokeWidth="2.5" 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              strokeDasharray="8 4"
+              opacity="0.7">
+              <animate attributeName="stroke-dashoffset" from="0" to="-12" dur=".5s" repeatCount="indefinite"/>
+            </polyline>
+            {clientRoute.slice(1, -1).map((p, i) => 
+              <circle key={`r${i}`} cx={p.x} cy={p.y} r="1.8" fill={client.color} opacity=".4"/>
+            )}
+          </g>
+        );
+      })}
+
+      {/* Route (Single Client Mode) */}
+      {!adminMode && rp.length > 1 && <g filter="url(#gs)">
         <polyline points={rp.map(p => `${p.x},${p.y}`).join(" ")} fill="none" stroke="url(#rg)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="10 5">
           <animate attributeName="stroke-dashoffset" from="0" to="-15" dur=".5s" repeatCount="indefinite"/>
         </polyline>
         {rp.slice(1, -1).map((p, i) => <circle key={`r${i}`} cx={p.x} cy={p.y} r="2.5" fill="#00ffaa" opacity=".5"/>)}
       </g>}
 
-      {/* User position */}
-      {userPos && <g filter="url(#gs)">
+      {/* Client Positions in Admin Mode */}
+      {adminMode && clients && clients.map(client => (
+        <g key={`cp${client.id}`} filter="url(#gs)">
+          <circle cx={client.pos.x} cy={client.pos.y} r="14" fill={`${client.color}08`} stroke={client.color} strokeWidth=".8">
+            <animate attributeName="r" values="10;18;10" dur="2s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values=".6;.12;.6" dur="2s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx={client.pos.x} cy={client.pos.y} r="5" fill={client.color}/>
+          <circle cx={client.pos.x} cy={client.pos.y} r="2" fill="#fff"/>
+          <text x={client.pos.x} y={client.pos.y - 20} textAnchor="middle" fill={client.color} fontSize="6" fontFamily="monospace" fontWeight="bold">
+            {client.name.split(" ")[1]}
+          </text>
+        </g>
+      ))}
+
+      {/* User position (Single Client Mode) */}
+      {!adminMode && userPos && <g filter="url(#gs)">
         <circle cx={userPos.x} cy={userPos.y} r="16" fill="#00aaff08" stroke="#00aaff" strokeWidth=".8">
           <animate attributeName="r" values="12;22;12" dur="2s" repeatCount="indefinite"/>
           <animate attributeName="opacity" values=".6;.12;.6" dur="2s" repeatCount="indefinite"/>
@@ -2057,16 +2096,8 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
         <circle cx={userPos.x} cy={userPos.y} r="2.5" fill="#fff"/>
       </g>}
 
-      {/* user position - hopefully with arrow + map rotation according to gyroscope? */}
-      {/* {userPos && (
-        <g transform={`translate(${userPos.x}, ${userPos.y}) rotate(${userHeading || 0})`}>
-          <circle r="16" fill="#00aaff08" stroke="#00aaff" strokeWidth=".8" />
-          <path d="M0 -12 L7 6 L0 2 L-7 6 Z" fill="#00ccff" /> 
-        </g>
-      )} */}
-
-      {/* Destination */}
-      {route && rp.length > 0 && <g filter="url(#gl)">
+      {/* Destination (Single Client Mode) */}
+      {!adminMode && route && rp.length > 0 && <g filter="url(#gl)">
         <circle cx={rp[rp.length-1].x} cy={rp[rp.length-1].y} r="10" fill="none" stroke="#00ff88" strokeWidth="2">
           <animate attributeName="r" values="10;17;10" dur="1.5s" repeatCount="indefinite"/>
           <animate attributeName="opacity" values="1;.2;1" dur="1.5s" repeatCount="indefinite"/>
@@ -2089,10 +2120,17 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
    MAIN APP — ECHOAID
    ═══════════════════════════════════════ */
 export default function App() {
-  const [status, setStatus] = useState("STANDBY");
-  const [uPos, setUPos] = useState(null);
-  const [uNode, setUNode] = useState(null);
-  const [route, setRoute] = useState(null);
+  // Initialize 5 controllable clients
+  const initialClients = [
+    { id: 1, name: "Client Alpha", pos: { x: tx(1783), y: ty(955) }, node: "p48", route: null, status: "STANDBY", progress: 0, color: "#00aaff" },
+    { id: 2, name: "Client Beta", pos: { x: tx(1418), y: ty(1014) }, node: "p43", route: null, status: "STANDBY", progress: 0, color: "#00ff88" },
+    { id: 3, name: "Client Gamma", pos: { x: tx(2047), y: ty(1018) }, node: "p6", route: null, status: "STANDBY", progress: 0, color: "#ffaa00" },
+    { id: 4, name: "Client Delta", pos: { x: tx(1289), y: ty(980) }, node: "p71", route: null, status: "STANDBY", progress: 0, color: "#ff44aa" },
+    { id: 5, name: "Client Epsilon", pos: { x: tx(2194), y: ty(948) }, node: "p54", route: null, status: "STANDBY", progress: 0, color: "#4488ff" },
+  ];
+  
+  const [clients, setClients] = useState(initialClients);
+  const [activeClientId, setActiveClientId] = useState(1);
   const [wifi, setWifi] = useState(true);
   const [logs, setLogs] = useState([]);
   const [listening, setListening] = useState(false);
@@ -2103,13 +2141,19 @@ export default function App() {
   const [exLoads, setExLoads] = useState({});
   const [analytics, setAnalytics] = useState(null);
   const [people, setPeople] = useState([]);
-  const [prog, setProg] = useState(0);
   const [showBM, setShowBM] = useState(false);
   const [hoveredRoom, setHoveredRoom] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [adminMode, setAdminMode] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
   const recRef = useRef(null);
   const logRef = useRef(null);
   const simRef = useRef(null);
+  
+  const activeClient = clients.find(c => c.id === activeClientId);
+  const updateClient = useCallback((id, updates) => {
+    setClients(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+  }, []);
 
   const log = useCallback((m, t = "info") => {
     const d = new Date();
@@ -2150,16 +2194,16 @@ export default function App() {
     return () => clearInterval(simRef.current);
   }, [refreshBrain]);
 
-  const evac = useCallback((nid) => {
-    setStatus("EVACUATING"); setProg(0);
+  const evac = useCallback((nid, clientId = activeClientId) => {
     const p = wifi ? brain.route(nid, "main") : brain.localRoute(nid);
     log(wifi ? "🌐 Global Brain: congestion-aware routing..." : "📶 Local Brain: nearest exit...", "route");
     if (p) {
-      setRoute(p);
+      updateClient(clientId, { route: p, status: "EVACUATING", progress: 0 });
       const last = NM[p[p.length-1]];
       const ex = EXITS.find(e => Math.abs(e.sx - last.x) < 20 && Math.abs(e.sy - last.y) < 20);
       const en = ex ? ex.label : "nearest exit";
-      log(`✅ Route: ${p.length} waypoints → ${en}`, "success");
+      const client = clients.find(c => c.id === clientId);
+      log(`✅ ${client?.name}: Route ${p.length} waypoints → ${en}`, "success");
       speak(`Route calculated. Head towards ${en}.`);
       if (wifi) {
         const a = brain.analytics();
@@ -2170,32 +2214,42 @@ export default function App() {
       log("⚠ No route found!", "error");
       speak("Warning. No route found.");
     }
-  }, [wifi, log, refreshBrain]);
+  }, [wifi, log, refreshBrain, activeClientId, clients, updateClient]);
 
   const onNode = useCallback(n => {
     if (!n) return;
-    setUNode(n.id); setUPos({ x: n.x, y: n.y });
-    log(`📍 Location set: ${n.label || n.id}`);
-    if (status === "EVACUATING") evac(n.id);
-  }, [status, evac, log]);
+    updateClient(activeClientId, { node: n.id, pos: { x: n.x, y: n.y } });
+    log(`📍 ${activeClient?.name}: Location set to ${n.label || n.id}`);
+    if (activeClient?.status === "EVACUATING") evac(n.id);
+  }, [activeClient, evac, log, activeClientId, updateClient]);
 
   const doEvac = useCallback(() => {
-    if (!uNode) { const d = "p48"; setUNode(d); setUPos({ x: NM[d].x, y: NM[d].y }); log("Auto-placed in MC 1052.", "warn"); evac(d); }
-    else evac(uNode);
-  }, [uNode, evac, log]);
+    if (!activeClient?.node) { 
+      const d = "p48"; 
+      updateClient(activeClientId, { node: d, pos: { x: NM[d].x, y: NM[d].y } });
+      log(`${activeClient?.name}: Auto-placed in MC 1052.`, "warn"); 
+      evac(d); 
+    } else {
+      evac(activeClient.node);
+    }
+  }, [activeClient, evac, log, activeClientId, updateClient]);
 
   const doBlock = useCallback(() => {
-    if (!route || route.length < 3) { log("Need active route.", "warn"); return; }
-    const idx = Math.min(prog + 1, route.length - 2);
-    const edge = `${route[idx]}-${route[idx+1]}`;
-    brain.addBlock(edge, "you"); setBlocks(brain.blocks());
+    if (!activeClient?.route || activeClient.route.length < 3) { log("Need active route.", "warn"); return; }
+    const idx = Math.min(activeClient.progress + 1, activeClient.route.length - 2);
+    const edge = `${activeClient.route[idx]}-${activeClient.route[idx+1]}`;
+    brain.addBlock(edge, activeClient.name); setBlocks(brain.blocks());
     log(`⛔ Blockade: ${edge}`, "error"); speak("Blockade reported. Rerouting all evacuees.");
     const rr = brain.rerouteAll();
     const a = brain.analytics();
     log(`🔄 ${rr.length} evacuees rerouted (3 convergence passes) · Balance: ${a.balanceScore}%`, "route");
     refreshBrain();
-    if (uNode) setTimeout(() => evac(uNode), 300);
-  }, [route, prog, uNode, evac, log, refreshBrain]);
+    clients.forEach(c => {
+      if (c.status === "EVACUATING" && c.node) {
+        setTimeout(() => evac(c.node, c.id), 300);
+      }
+    });
+  }, [activeClient, clients, evac, log, refreshBrain]);
 
   const doRandomBlock = useCallback(() => {
     // Create a random blockage on any hallway edge
@@ -2226,17 +2280,29 @@ export default function App() {
     brain.rmBlock(edge); setBlocks(brain.blocks());
     log(`✅ Cleared: ${edge}`, "success"); speak("Blockade cleared.");
     brain.rerouteAll(); refreshBrain();
-    if (uNode && status === "EVACUATING") setTimeout(() => evac(uNode), 300);
-  }, [uNode, status, evac, log]);
+    clients.forEach(c => {
+      if (c.status === "EVACUATING" && c.node) {
+        setTimeout(() => evac(c.node, c.id), 300);
+      }
+    });
+  }, [clients, evac, log, refreshBrain]);
 
   const clearAll = useCallback(() => {
     brain.clearBlocks(); setBlocks([]);
     log("✅ All blockades cleared.", "success"); speak("All blockades cleared.");
     brain.rerouteAll(); refreshBrain();
-    if (uNode && status === "EVACUATING") setTimeout(() => evac(uNode), 300);
-  }, [uNode, status, evac, log]);
+    clients.forEach(c => {
+      if (c.status === "EVACUATING" && c.node) {
+        setTimeout(() => evac(c.node, c.id), 300);
+      }
+    });
+  }, [clients, evac, log, refreshBrain]);
 
-  const doSafe = useCallback(() => { setStatus("SAFE"); setRoute(null); log("✅ SAFE.", "success"); speak("You are safe."); }, [log]);
+  const doSafe = useCallback(() => {
+    updateClient(activeClientId, { status: "SAFE", route: null });
+    log(`✅ ${activeClient?.name}: SAFE.`, "success");
+    speak("You are safe.");
+  }, [log, activeClientId, activeClient, updateClient]);
 
   // Voice recognition
   const startListen = useCallback(() => {
@@ -2257,88 +2323,85 @@ export default function App() {
     r.start(); recRef.current = r; setListening(true); log("🎤 Listening...");
   }, [doEvac, doBlock, clearAll, doSafe, log]);
 
-  // Evacuation step timer
+  // Evacuation step timer - moves each evacuating client
   useEffect(() => {
-    if (status !== "EVACUATING" || !route || route.length < 2) return;
-    const iv = setInterval(() => {
-      setProg(p => {
-        const n = p + 1;
-        if (n >= route.length - 1) { clearInterval(iv); doSafe(); return p; }
-        const nn = NM[route[n]]; if (nn) { setUPos({ x: nn.x, y: nn.y }); setUNode(route[n]); }
-        if (n === Math.floor(route.length / 2)) speak("Halfway there.");
-        return n;
-      });
-    }, 5000);
-    return () => clearInterval(iv);
-  }, [status, route]);
+    const intervals = {};
+    clients.forEach(client => {
+      if (client.status !== "EVACUATING" || !client.route || client.route.length < 2) return;
+      intervals[client.id] = setInterval(() => {
+        const newProgress = client.progress + 1;
+        if (newProgress >= client.route.length - 1) {
+          clearInterval(intervals[client.id]);
+          updateClient(client.id, { status: "SAFE", route: null });
+          if (client.id === activeClientId) {
+            speak("You are safe.");
+            log(`✅ ${client.name}: Evacuated successfully!`, "success");
+          }
+        } else {
+          const nn = NM[client.route[newProgress]];
+          if (nn) {
+            updateClient(client.id, {
+              progress: newProgress,
+              pos: { x: nn.x, y: nn.y },
+              node: client.route[newProgress]
+            });
+          }
+          if (newProgress === Math.floor(client.route.length / 2) && client.id === activeClientId) {
+            speak("Halfway there.");
+          }
+        }
+      }, 1800);
+    });
+    return () => {
+      Object.values(intervals).forEach(iv => clearInterval(iv));
+    };
+  }, [clients, activeClientId, updateClient]);
 
   // Room search
   const filteredRooms = searchQuery
     ? ROOMS.filter(r => r.label.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 8)
     : [];
 
-  const sc = status === "EVACUATING" ? "#ff4444" : status === "SAFE" ? "#00ff88" : "#00aaff";
-
-// useEffect(() => {
-//   if (status !== "EVACUATING") return;
-
-//   const lonOffset = -80.5447; 
-//   const latOffset = 43.4723;
-//   const multiplier = 200000;
-
-//   const watchId = navigator.geolocation.watchPosition((pos) => {
-//     const { latitude, longitude } = pos.coords;
-//     setUPos({ 
-//       x: tx((longitude - lonOffset) * multiplier), 
-//       y: ty((latitude - latOffset) * multiplier) 
-//     });
-//   }, err => console.error(err), { enableHighAccuracy: true });
-  
-//   // Gyroscope
-//   const handleOrientation = (e) => {
-//     const compass = e.webkitCompassHeading || Math.abs(e.alpha - 360);
-//     setUHeading(compass);
-//   };
-//   if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-//     DeviceOrientationEvent.requestPermission()
-//       .then(response => {
-//         if (response === 'granted') {
-//           window.addEventListener('deviceorientation', handleOrientation);
-//         }
-//       })
-//       .catch(console.error);
-//   } else {
-//     window.addEventListener('deviceorientation', handleOrientation);
-//   }
-
-//   return () => {
-//     navigator.geolocation.clearWatch(watchId);
-//     window.removeEventListener('deviceorientation', handleOrientation);
-//   };
-// }, [status]); // Trigger when status changes to 'EVACUATING'
-
+  const sc = activeClient?.status === "EVACUATING" ? "#ff4444" : activeClient?.status === "SAFE" ? "#00ff88" : "#00aaff";
 
   return (
-    <div style={{ minHeight: "100vh", background: "#060a10", color: "#c0d0e0", fontFamily: "'IBM Plex Sans',sans-serif" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0a0e14}::-webkit-scrollbar-thumb{background:#1a2a40;border-radius:4px}`}</style>
+    <div className="app-shell" style={{ minHeight: "100vh", color: "#c0d0e0", fontFamily: "'IBM Plex Sans',sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap');@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0a0e14}::-webkit-scrollbar-thumb{background:#1a2a40;border-radius:4px}.app-shell{background:radial-gradient(1200px 600px at 10% -10%,#112a45 0%,transparent 60%),radial-gradient(900px 500px at 90% -10%,#401a22 0%,transparent 55%),radial-gradient(800px 600px at 50% 120%,#0f2a24 0%,transparent 60%),#05070d;color:#c7d4e5}.app-header{backdrop-filter:blur(10px);background:linear-gradient(135deg,#0b111a,#0b0f1d);border-bottom:1px solid #1a2a40;box-shadow:0 10px 30px #00000055}.card{background:linear-gradient(180deg,#0c121c,#080c13);border:1px solid #1a2a40;box-shadow:0 10px 30px #00000055,inset 0 1px 0 #ffffff08;transition:transform .3s ease,box-shadow .3s ease,border-color .3s ease}.card:hover{transform:translateY(-2px);box-shadow:0 16px 40px #00000066,inset 0 1px 0 #ffffff12}.map-shell{background:linear-gradient(180deg,#0b111c,#080c14);border:1px solid #1d314a;box-shadow:0 16px 40px #00000066;transition:transform .3s ease,box-shadow .3s ease,border-color .3s ease}.panel-title{letter-spacing:2px;font-family:'Space Grotesk',sans-serif}`}</style>
 
       {/* HEADER */}
-      <header style={{ background: "#0a0e17", borderBottom: "1px solid #1a2a40", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
+      <header className="app-header" style={{ padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: status === "EVACUATING" ? "linear-gradient(135deg,#ff2200,#ff6600)" : status === "SAFE" ? "linear-gradient(135deg,#00cc66,#00ff88)" : "linear-gradient(135deg,#0066ff,#00aaff)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, boxShadow: `0 0 20px ${sc}40` }}>
-            {status === "EVACUATING" ? "🚨" : status === "SAFE" ? "✅" : "🏢"}
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: activeClient?.status === "EVACUATING" ? "linear-gradient(135deg,#ff2200,#ff6600)" : activeClient?.status === "SAFE" ? "linear-gradient(135deg,#00cc66,#00ff88)" : "linear-gradient(135deg,#0066ff,#00aaff)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, boxShadow: `0 0 20px ${sc}40` }}>
+            {activeClient?.status === "EVACUATING" ? "🚨" : activeClient?.status === "SAFE" ? "✅" : "🏢"}
           </div>
           <div>
-            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, fontSize: 16, color: "#e0eeff", letterSpacing: 1.5 }}>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, fontSize: 18, color: "#e6f2ff", letterSpacing: 2, textShadow: "0 0 18px #00aaff30" }}>
               ECHO<span style={{ color: "#00aaff" }}>AID</span>
             </div>
             <div style={{ fontSize: 9, color: "#445566", fontFamily: "monospace" }}>MC Building No.17 — UWaterloo — Real Floor Plan Data</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* Mode Switcher */}
+          <select value={adminMode ? "admin" : "client"} onChange={e => setAdminMode(e.target.value === "admin")}
+            style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${adminMode ? "#ff880040" : "#1a2a40"}`, background: adminMode ? "#ff880010" : "#0a0e14", color: adminMode ? "#ffaa00" : "#7799bb", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, fontWeight: 600, cursor: "pointer", outline: "none" }}>
+            <option value="client">👤 Client View</option>
+            <option value="admin">🛡️ Admin Dashboard</option>
+          </select>
+          
+          {/* Client Selector */}
+          {!adminMode && (
+            <select value={activeClientId} onChange={e => setActiveClientId(Number(e.target.value))}
+              style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${activeClient?.color}40`, background: "#0a0e14", color: activeClient?.color, fontFamily: "'JetBrains Mono',monospace", fontSize: 10, fontWeight: 600, cursor: "pointer", outline: "none" }}>
+              {clients.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+          
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: sc, boxShadow: `0 0 8px ${sc}`, animation: status === "EVACUATING" ? "pulse 1s infinite" : "none" }} />
-            <span style={{ color: sc, fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>{status}</span>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: sc, boxShadow: `0 0 8px ${sc}`, animation: activeClient?.status === "EVACUATING" ? "pulse 1s infinite" : "none" }} />
+            <span style={{ color: sc, fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>{activeClient?.status || "STANDBY"}</span>
           </div>
           <span style={{ color: "#334455", fontSize: 10, fontFamily: "monospace" }}>
             {wifi ? "📡 Global" : "📶 Local"} · {analytics?.totalUsers || 0} users · Balance {analytics?.balanceScore || 0}% · {blocks.length} blocks
@@ -2348,15 +2411,28 @@ export default function App() {
 
       <div style={{ padding: "14px 20px", maxWidth: 1600, margin: "0 auto" }}>
         {/* MAP */}
-        <div style={{ background: "#0a0e17", border: "1px solid #1a2a40", borderRadius: 12, padding: 12, marginBottom: 14 }}>
-          <FloorPlan userPos={uPos} route={route} blockades={blocks} congestion={cong} edgeCong={eCong} exitLoadData={exLoads} onClick={onNode} people={people} hoveredRoom={hoveredRoom} setHoveredRoom={setHoveredRoom} />
-          {route && <div style={{ marginTop: 10 }}>
+        <div className="map-shell" style={{ borderRadius: 12, padding: 12, marginBottom: 14 }}>
+          <FloorPlan 
+            userPos={adminMode ? null : activeClient?.pos} 
+            route={adminMode ? null : activeClient?.route} 
+            blockades={blocks} 
+            congestion={cong} 
+            edgeCong={eCong} 
+            exitLoadData={exLoads} 
+            onClick={onNode} 
+            people={people} 
+            hoveredRoom={hoveredRoom} 
+            setHoveredRoom={setHoveredRoom}
+            clients={clients}
+            adminMode={adminMode}
+          />
+          {activeClient?.route && !adminMode && <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-              <span style={{ color: "#556677", fontSize: 11, fontFamily: "monospace" }}>Evacuation Progress</span>
-              <span style={{ color: "#00ff88", fontSize: 11, fontFamily: "monospace", fontWeight: 600 }}>{Math.round(prog / (route.length - 1) * 100)}%</span>
+              <span style={{ color: "#556677", fontSize: 11, fontFamily: "monospace" }}>{activeClient.name} - Evacuation Progress</span>
+              <span style={{ color: "#00ff88", fontSize: 11, fontFamily: "monospace", fontWeight: 600 }}>{Math.round(activeClient.progress / (activeClient.route.length - 1) * 100)}%</span>
             </div>
             <div style={{ height: 4, background: "#1a2a40", borderRadius: 2, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${prog / (route.length - 1) * 100}%`, background: "linear-gradient(90deg,#00ffaa,#00aaff)", transition: "width .5s" }} />
+              <div style={{ height: "100%", width: `${activeClient.progress / (activeClient.route.length - 1) * 100}%`, background: `linear-gradient(90deg,${activeClient.color},${activeClient.color}aa)`, transition: "width .5s" }} />
             </div>
           </div>}
         </div>
@@ -2364,7 +2440,7 @@ export default function App() {
         {/* CONTROLS GRID */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
           {/* Room Search + Actions */}
-          <div style={{ background: "#0d1117", border: "1px solid #1a2a40", borderRadius: 10, padding: 14 }}>
+          <div className="card" style={{ borderRadius: 10, padding: 14 }}>
             <div style={{ color: "#8899bb", fontSize: 10, fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>📍 Find Your Room</div>
             <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search room (e.g. 1052, 1047...)" style={{ width: "100%", padding: "8px 12px", borderRadius: 7, border: "1px solid #1a2a40", background: "#0a0e14", color: "#c0d0e0", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, outline: "none", marginBottom: 6 }} />
@@ -2380,15 +2456,15 @@ export default function App() {
               </div>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
-              <button onClick={doEvac} style={{ padding: 12, borderRadius: 8, border: "none", cursor: "pointer", background: status === "EVACUATING" ? "linear-gradient(135deg,#cc2200,#ff4400)" : "linear-gradient(135deg,#0055cc,#0088ff)", color: "#fff", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>
-                {status === "EVACUATING" ? "🚨 REROUTE" : "🚀 EVACUATE"}
+              <button onClick={doEvac} style={{ padding: 12, borderRadius: 8, border: "none", cursor: "pointer", background: activeClient?.status === "EVACUATING" ? "linear-gradient(135deg,#cc2200,#ff4400)" : "linear-gradient(135deg,#0055cc,#0088ff)", color: "#fff", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>
+                {activeClient?.status === "EVACUATING" ? "🚨 REROUTE" : "🚀 EVACUATE"}
               </button>
               <button onClick={doBlock} style={{ padding: 12, borderRadius: 8, border: "1px solid #ff444040", background: "#ff111110", color: "#ff6666", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>⛔ BLOCKADE</button>
             </div>
           </div>
 
           {/* Voice + Commands */}
-          <div style={{ background: "#0d1117", border: "1px solid #1a2a40", borderRadius: 10, padding: 14 }}>
+          <div className="card" style={{ borderRadius: 10, padding: 14 }}>
             <div style={{ color: "#8899bb", fontSize: 10, fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>🎙️ Voice Control & Commands</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <div onClick={() => listening ? (recRef.current?.stop(), setListening(false)) : startListen()}
@@ -2409,72 +2485,205 @@ export default function App() {
             </div>
           </div>
 
-          {/* ═══ GLOBAL BRAIN DASHBOARD ═══ */}
-          <div style={{ background: "#0d1117", border: `1px solid ${wifi ? "#00aaff20" : "#1a2a40"}`, borderRadius: 10, padding: 14 }}>
-            <div style={{ color: "#8899bb", fontSize: 10, fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>🧠 Global Brain</div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-              <button onClick={() => setWifi(true)} style={{ padding: "8px 14px", borderRadius: 7, border: `1px solid ${wifi ? "#00aaff" : "#1a2a40"}`, background: wifi ? "#00aaff15" : "#0a0e14", color: wifi ? "#00aaff" : "#556677", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, cursor: "pointer", fontWeight: wifi ? 600 : 400 }}>📡 WiFi (Global)</button>
-              <button onClick={() => setWifi(false)} style={{ padding: "8px 14px", borderRadius: 7, border: `1px solid ${!wifi ? "#ff8800" : "#1a2a40"}`, background: !wifi ? "#ff880015" : "#0a0e14", color: !wifi ? "#ff8800" : "#556677", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, cursor: "pointer", fontWeight: !wifi ? 600 : 400 }}>📶 BT (Local)</button>
-            </div>
-
-            {/* Stats row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
-              {[
-                [analytics?.totalUsers || 0, "Evacuees", "#00aaff"],
-                [blocks.length, "Blocks", blocks.length ? "#ff4444" : "#00ff88"],
-                [`${analytics?.balanceScore || 0}%`, "Balance", (analytics?.balanceScore || 0) > 70 ? "#00ff88" : (analytics?.balanceScore || 0) > 40 ? "#ffaa00" : "#ff4444"],
-              ].map(([v, l, c]) => (
-                <div key={l} style={{ background: "#0a0e14", borderRadius: 6, padding: 8, textAlign: "center" }}>
-                  <div style={{ color: c, fontSize: 16, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{v}</div>
-                  <div style={{ color: "#445566", fontSize: 8, fontFamily: "monospace" }}>{l}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Exit load bars */}
-            <div style={{ color: "#556677", fontSize: 9, fontFamily: "monospace", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Exit Distribution</div>
-            {(() => {
-              const exitNames = { p8: "North", p23: "East N", p125: "West (ESC)", p133: "South" };
-              const exitColors = { p8: "#4488ff", p23: "#ff8844", p125: "#44ff88", p133: "#ff44aa" };
-              return EX_IDS.map(eid => {
-                const load = exLoads[eid] || 0;
-                const cap = EXIT_CAPACITY[eid] || 12;
-                const ratio = Math.min(load / cap, 1);
-                const barColor = ratio > 0.8 ? "#ff4444" : ratio > 0.5 ? "#ffaa00" : exitColors[eid];
-                return (
-                  <div key={eid} style={{ marginBottom: 5 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-                      <span style={{ color: exitColors[eid], fontSize: 9, fontFamily: "monospace" }}>{exitNames[eid]}</span>
-                      <span style={{ color: "#556677", fontSize: 9, fontFamily: "monospace" }}>{load}/{cap}</span>
-                    </div>
-                    <div style={{ height: 4, background: "#0a0e14", borderRadius: 2, overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${ratio * 100}%`, background: barColor, borderRadius: 2, transition: "width .5s" }} />
-                    </div>
-                  </div>
-                );
-              });
-            })()}
-
-            {/* Bottleneck alert */}
-            {analytics?.bottleneck && analytics.bottleneck.load > 3 && (
-              <div style={{ marginTop: 8, background: "#ff111110", border: "1px solid #ff444420", borderRadius: 6, padding: "6px 10px" }}>
-                <div style={{ color: "#ff6666", fontSize: 9, fontFamily: "monospace", fontWeight: 600 }}>⚠ Bottleneck Detected</div>
-                <div style={{ color: "#445566", fontSize: 8, fontFamily: "monospace" }}>
-                  Corridor {analytics.bottleneck.edge.replace("~","→")} · {analytics.bottleneck.load} users sharing
-                </div>
-              </div>
-            )}
-
-            <div style={{ marginTop: 8, color: "#334455", fontSize: 8, fontFamily: "monospace", lineHeight: 1.6 }}>
-              {wifi
-                ? "All AI agents share memory. Edge-aware congestion routing. 3-pass iterative convergence for balanced exit distribution. Blockades sync globally."
-                : "Offline mode. Local A* pathfinding only. No crowd intelligence."}
-            </div>
-          </div>
         </div>
 
+        {/* ═══════════════════════════════════════════════════════════
+            ADMIN DASHBOARD - Emergency Management & User Monitoring
+            ═══════════════════════════════════════════════════════════ */}
+        {adminMode && (
+          <>
+            {/* Emergency Stats Overview */}
+            <div className="card" style={{ borderRadius: 10, padding: 14, marginTop: 12, border: "1px solid #ffaa0030" }}>
+              <div style={{ color: "#ffaa00", fontSize: 11, fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>
+                🛡️ Emergency Control Center
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                {[
+                  [clients.filter(c => c.status === "SAFE").length, "Evacuated", "#00ff88", "✓"],
+                  [clients.filter(c => c.status === "EVACUATING").length, "Evacuating", "#ffaa00", "→"],
+                  [clients.filter(c => c.status === "STANDBY").length, "Still Inside", "#ff4444", "!"],
+                  [clients.filter(c => c.status === "EVACUATING" && Math.random() < 0.2).length, "Need Help", "#ff0044", "🆘"],
+                ].map(([count, label, color, icon]) => (
+                  <div key={label} style={{ background: `${color}08`, border: `1px solid ${color}30`, borderRadius: 8, padding: 10, textAlign: "center" }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color, fontFamily: "'JetBrains Mono',monospace", marginBottom: 2 }}>{icon} {count}</div>
+                    <div style={{ fontSize: 9, color: "#556677", fontFamily: "monospace", textTransform: "uppercase" }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Exit Load Distribution */}
+              <div style={{ color: "#556677", fontSize: 9, fontFamily: "monospace", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>🚪 Exit Load Distribution</div>
+              {(() => {
+                const exitNames = { p8: "North Exit", p23: "East N Exit", p125: "West Exit (ESC)", p133: "South Exit" };
+                const exitColors = { p8: "#4488ff", p23: "#ff8844", p125: "#44ff88", p133: "#ff44aa" };
+                return EX_IDS.map(eid => {
+                  const load = exLoads[eid] || 0;
+                  const cap = EXIT_CAPACITY[eid] || 12;
+                  const ratio = Math.min(load / cap, 1);
+                  const barColor = ratio > 0.8 ? "#ff4444" : ratio > 0.5 ? "#ffaa00" : exitColors[eid];
+                  return (
+                    <div key={eid} style={{ marginBottom: 5 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                        <span style={{ color: exitColors[eid], fontSize: 9, fontFamily: "monospace", fontWeight: 600 }}>{exitNames[eid]}</span>
+                        <span style={{ color: "#556677", fontSize: 9, fontFamily: "monospace" }}>{load}/{cap} ({Math.round(ratio * 100)}%)</span>
+                      </div>
+                      <div style={{ height: 5, background: "#0a0e14", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${ratio * 100}%`, background: barColor, borderRadius: 3, transition: "width .5s" }} />
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Live Clients Monitor */}
+            <div className="card" style={{ borderRadius: 10, padding: 14, marginTop: 12, border: "1px solid #00aaff30" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ color: "#00aaff", fontSize: 11, fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>
+                  👥 Controllable Clients ({clients.length})
+                </div>
+                <div style={{ display: "flex", gap: 6, fontSize: 8, fontFamily: "monospace" }}>
+                  <span style={{ color: "#00ff88" }}>● Safe</span>
+                  <span style={{ color: "#ffaa00" }}>● Evacuating</span>
+                  <span style={{ color: "#ff4444" }}>● Standby</span>
+                </div>
+              </div>
+
+              <div style={{ maxHeight: 400, overflowY: "auto", marginTop: 8 }}>
+                {clients.map((client) => {
+                  const isEvacuated = client.status === "SAFE";
+                  const isEvacuating = client.status === "EVACUATING";
+                  const statusColor = isEvacuated ? "#00ff88" : isEvacuating ? "#ffaa00" : "#ff4444";
+                  const statusText = isEvacuated ? "Evacuated" : isEvacuating ? "Evacuating" : "Standby";
+                  const exitNames = { p8: "North", p23: "East N", p125: "West", p133: "South" };
+                  const currentNode = NM[client.route?.[client.progress]] || NM[client.node] || {};
+                  const exitNode = client.route ? NM[client.route[client.route.length - 1]] : null;
+                  
+                  return (
+                    <div 
+                      key={client.id}
+                      onClick={() => setSelectedUser(selectedUser === client.id ? null : client.id)}
+                      style={{ 
+                        background: selectedUser === client.id ? "#1a2a4020" : "#0a0e14", 
+                        border: `1px solid ${selectedUser === client.id ? client.color + "60" : client.color + "30"}`, 
+                        borderRadius: 8, 
+                        padding: "8px 12px", 
+                        marginBottom: 6,
+                        cursor: "pointer",
+                        transition: "all .2s ease"
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 4 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                            <div style={{ width: 6, height: 6, borderRadius: "50%", background: client.color, boxShadow: `0 0 6px ${client.color}` }} />
+                            <span style={{ color: client.color, fontSize: 11, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }}>
+                              {client.name}
+                            </span>
+                            <span style={{ background: `${statusColor}20`, border: `1px solid ${statusColor}`, borderRadius: 4, padding: "1px 5px", fontSize: 8, color: statusColor, fontWeight: 600 }}>{statusText}</span>
+                          </div>
+                          <div style={{ color: "#556677", fontSize: 9, fontFamily: "monospace", lineHeight: 1.5 }}>
+                            Location: <span style={{ color: "#7799bb", fontWeight: 600 }}>{currentNode.label || client.node}</span>
+                            {client.route && <> · Exit: <span style={{ color: "#00aaff" }}>{exitNode?.label || "Unknown"}</span></>}
+                          </div>
+                        </div>
+                        {isEvacuating && (
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ color: statusColor, fontSize: 10, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }}>
+                              {Math.round((client.progress / (client.route.length - 1)) * 100)}%
+                            </div>
+                            <div style={{ fontSize: 8, color: "#445566", fontFamily: "monospace" }}>
+                              {client.progress}/{client.route.length - 1}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Progress bar */}
+                      {isEvacuating && (
+                        <div style={{ height: 3, background: "#1a2a40", borderRadius: 2, overflow: "hidden", marginBottom: selectedUser === client.id ? 8 : 0 }}>
+                          <div style={{ height: "100%", width: `${(client.progress / (client.route.length - 1)) * 100}%`, background: `linear-gradient(90deg, ${client.color}, ${client.color}aa)`, transition: "width .5s" }} />
+                        </div>
+                      )}
+
+                      {/* Expanded details + Actions */}
+                      {selectedUser === client.id && (
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #1a2a40" }}>
+                          <div style={{ color: "#7799bb", fontSize: 9, fontFamily: "monospace", marginBottom: 4 }}>
+                            📍 Position: ({Math.round(client.pos.x)}, {Math.round(client.pos.y)})
+                          </div>
+                          {client.route && (
+                            <div style={{ color: "#7799bb", fontSize: 9, fontFamily: "monospace", marginBottom: 6 }}>
+                              🛣️ Route: {client.route.length} waypoints
+                            </div>
+                          )}
+                          {/* Admin Actions */}
+                          <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+                            {!isEvacuating && client.node && (
+                              <button onClick={(e) => { e.stopPropagation(); evac(client.node, client.id); }}
+                                style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: "none", background: "linear-gradient(135deg,#0055cc,#0088ff)", color: "#fff", fontSize: 9, fontFamily: "monospace", fontWeight: 600, cursor: "pointer" }}>
+                                🚀 Start Evacuation
+                              </button>
+                            )}
+                            {isEvacuating && (
+                              <button onClick={(e) => { e.stopPropagation(); updateClient(client.id, { status: "SAFE", route: null }); }}
+                                style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: "1px solid #00ff8840", background: "#00ff8810", color: "#00ff88", fontSize: 9, fontFamily: "monospace", fontWeight: 600, cursor: "pointer" }}>
+                                ✓ Mark Safe
+                              </button>
+                            )}
+                            <button onClick={(e) => { e.stopPropagation(); setActiveClientId(client.id); setAdminMode(false); }}
+                              style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: `1px solid ${client.color}40`, background: `${client.color}10`, color: client.color, fontSize: 9, fontFamily: "monospace", fontWeight: 600, cursor: "pointer" }}>
+                              🎮 Control
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Global Brain Analytics */}
+            <div className="card" style={{ borderRadius: 10, padding: 14, marginTop: 12, border: "1px solid #44ff8830" }}>
+              <div style={{ color: "#44ff88", fontSize: 11, fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>
+                🧠 AI Brain Analytics
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div style={{ background: "#0a0e14", borderRadius: 6, padding: 10 }}>
+                  <div style={{ color: "#556677", fontSize: 8, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 4 }}>Network Mode</div>
+                  <div style={{ color: wifi ? "#00aaff" : "#ff8800", fontSize: 14, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }}>
+                    {wifi ? "📡 Global AI" : "📶 Local Only"}
+                  </div>
+                </div>
+                <div style={{ background: "#0a0e14", borderRadius: 6, padding: 10 }}>
+                  <div style={{ color: "#556677", fontSize: 8, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 4 }}>Load Balance</div>
+                  <div style={{ color: (analytics?.balanceScore || 0) > 70 ? "#00ff88" : (analytics?.balanceScore || 0) > 40 ? "#ffaa00" : "#ff4444", fontSize: 14, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }}>
+                    {analytics?.balanceScore || 0}%
+                  </div>
+                </div>
+              </div>
+              
+              {analytics?.bottleneck && analytics.bottleneck.load > 3 && (
+                <div style={{ marginTop: 10, background: "#ff111110", border: "1px solid #ff444420", borderRadius: 6, padding: "8px 12px" }}>
+                  <div style={{ color: "#ff6666", fontSize: 10, fontFamily: "monospace", fontWeight: 600, marginBottom: 2 }}>⚠️ Bottleneck Detected</div>
+                  <div style={{ color: "#ff8888", fontSize: 9, fontFamily: "monospace" }}>
+                    Corridor {analytics.bottleneck.edge.replace("~","→")} · {analytics.bottleneck.load} users · High congestion
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginTop: 10, color: "#445566", fontSize: 8, fontFamily: "monospace", lineHeight: 1.6 }}>
+                {wifi 
+                  ? "✓ Global brain active. Congestion-aware routing. Real-time load balancing across all exits. Iterative convergence algorithm optimizing evacuation flow." 
+                  : "⚠ Offline mode. Local pathfinding only. No crowd intelligence or dynamic rerouting."}
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Blockade Manager */}
-        <div style={{ background: "#0d1117", border: `1px solid ${blocks.length > 0 ? "#ff444440" : "#1a2a40"}`, borderRadius: 10, padding: 14, marginTop: 12 }}>
+        <div className="card" style={{ border: `1px solid ${blocks.length > 0 ? "#ff444440" : "#1a2a40"}`, borderRadius: 10, padding: 14, marginTop: 12 }}>
           <div onClick={() => setShowBM(!showBM)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
             <span style={{ color: blocks.length > 0 ? "#ff6666" : "#8899bb", fontSize: 10, fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase" }}>⛔ Blockade & Reroute Manager ({blocks.length})</span>
             <span style={{ color: "#445566", fontSize: 10 }}>{showBM ? "▲" : "▼"}</span>
@@ -2510,7 +2719,7 @@ export default function App() {
         </div>
 
         {/* AI LOG */}
-        <div ref={logRef} style={{ background: "#0a0e14", border: "1px solid #1a2a40", borderRadius: 10, padding: 12, maxHeight: 150, overflowY: "auto", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, marginTop: 12 }}>
+        <div ref={logRef} className="card" style={{ borderRadius: 10, padding: 12, maxHeight: 150, overflowY: "auto", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, marginTop: 12 }}>
           <div style={{ color: "#445566", fontSize: 9, marginBottom: 6, letterSpacing: 1, textTransform: "uppercase" }}>AI Brain Log</div>
           {logs.map((l, i) => (
             <div key={i} style={{ marginBottom: 3, lineHeight: 1.4 }}>
