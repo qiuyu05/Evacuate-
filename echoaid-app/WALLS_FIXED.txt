@@ -1,0 +1,17 @@
+Your current WALLS_RAW has incorrect data.
+
+The working code you provided has completely different wall coordinates that properly align with the rooms.
+
+To fix:
+1. Replace your WALLS_RAW with the correct data from your working code
+2. Remove the separate txWall/tyWall transforms
+3. Remove the wallOffsetX/wallOffsetY calibration UI
+4. Use the same tx/ty transform for both walls and rooms
+
+The walls in your working code start with coordinates like:
+[[856,786,856,882],[856,882,856,786],[862,914,862,968]...]
+
+But your current app has:
+[[851,1244,949,1244],[852,204,949,204],[853,755,996,755]...]
+
+These are completely different coordinate sets! That's why they don't align.
