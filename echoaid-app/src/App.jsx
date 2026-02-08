@@ -1853,50 +1853,51 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
   })), []);
 
   // Click handler to show coordinates
-  const handleSvgClick = (e) => {
-    const svg = e.currentTarget;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
+  // const handleSvgClick = (e) => {
+  //   const svg = e.currentTarget;
+  //   const pt = svg.createSVGPoint();
+  //   pt.x = e.clientX;
+  //   pt.y = e.clientY;
+  //   const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
 
-    // Convert back to GeoJSON coordinates (inverse transform)
-    const geoX = svgP.x / S + OX;
-    const geoY = svgP.y / S + OY;
+  //   // Convert back to GeoJSON coordinates (inverse transform)
+  //   const geoX = svgP.x / S + OX;
+  //   const geoY = svgP.y / S + OY;
 
-    // Check if near any room or exit
-    let nearbyLabel = "";
-    const searchRadius = 15; // pixels in SVG space
+  //   // Check if near any room or exit
+  //   let nearbyLabel = "";
+  //   const searchRadius = 15; // pixels in SVG space
 
-    // Check rooms
-    for (const room of ROOMS) {
-      const dist = Math.sqrt((room.sx - svgP.x) ** 2 + (room.sy - svgP.y) ** 2);
-      if (dist < searchRadius) {
-        nearbyLabel = `Room ${room.label}`;
-        break;
-      }
-    }
+  //   // Check rooms
+  //   for (const room of ROOMS) {
+  //     const dist = Math.sqrt((room.sx - svgP.x) ** 2 + (room.sy - svgP.y) ** 2);
+  //     if (dist < searchRadius) {
+  //       nearbyLabel = `Room ${room.label}`;
+  //       break;
+  //     }
+  //   }
 
-    // Check exits if no room found
-    if (!nearbyLabel) {
-      for (const exit of EXITS) {
-        const dist = Math.sqrt((exit.sx - svgP.x) ** 2 + (exit.sy - svgP.y) ** 2);
-        if (dist < searchRadius) {
-          nearbyLabel = exit.label;
-          break;
-        }
-      }
-    }
+  //   // Check exits if no room found
+  //   if (!nearbyLabel) {
+  //     for (const exit of EXITS) {
+  //       const dist = Math.sqrt((exit.sx - svgP.x) ** 2 + (exit.sy - svgP.y) ** 2);
+  //       if (dist < searchRadius) {
+  //         nearbyLabel = exit.label;
+  //         break;
+  //       }
+  //     }
+  //   }
 
-    const labelInfo = nearbyLabel ? `\nNearest: ${nearbyLabel}` : "";
-    console.log(`🎯 Clicked coordinates:\n  SVG: (${svgP.x.toFixed(1)}, ${svgP.y.toFixed(1)})\n  GeoJSON: (${geoX.toFixed(1)}, ${geoY.toFixed(1)})${labelInfo}`);
-    alert(`Clicked Coordinates:\n\nSVG: (${svgP.x.toFixed(1)}, ${svgP.y.toFixed(1)})\nGeoJSON: (${geoX.toFixed(1)}, ${geoY.toFixed(1)})${labelInfo}\n\nUse the GeoJSON coordinates for exit placement.`);
-  };
+  //   const labelInfo = nearbyLabel ? `\nNearest: ${nearbyLabel}` : "";
+  //   console.log(`🎯 Clicked coordinates:\n  SVG: (${svgP.x.toFixed(1)}, ${svgP.y.toFixed(1)})\n  GeoJSON: (${geoX.toFixed(1)}, ${geoY.toFixed(1)})${labelInfo}`);
+  //   alert(`Clicked Coordinates:\n\nSVG: (${svgP.x.toFixed(1)}, ${svgP.y.toFixed(1)})\nGeoJSON: (${geoX.toFixed(1)}, ${geoY.toFixed(1)})${labelInfo}\n\nUse the GeoJSON coordinates for exit placement.`);
+  // };
 
   return (
     <svg viewBox="-150 0 1350 1120" preserveAspectRatio="xMidYMid meet"
       style={{ width: "100%", height: "100%", background: "#060a10", borderRadius: 12, display: "block" }}
-      onClick={handleSvgClick}>
+      // onClick={handleSvgClick}
+      >
       <defs>
         <filter id="gl"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
         <filter id="gs"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -1917,14 +1918,14 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
         if (!na || !nb) return null;
         return (
           <line key={`edge-${i}`} x1={na.x} y1={na.y} x2={nb.x} y2={nb.y}
-            stroke="#90EE90" strokeWidth="3" strokeLinecap="round" opacity="0.6"/>
+            stroke="transparent" strokeWidth="3" strokeLinecap="round" opacity="0"/>
         );
       })}
 
       {/* Intermediate Waypoints (auto-generated along edges) */}
       {EXTRA.map(wp => (
         <circle key={wp.id} cx={wp.x} cy={wp.y} r="2"
-          fill="#90EE90" opacity="0.4" stroke="#228B22" strokeWidth="0.5"/>
+          fill="transparent" opacity="0" stroke="transparent" strokeWidth="0.5"/>
       ))}
 
       {/* Rooms */}
@@ -1942,9 +1943,9 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
             }}
             onMouseEnter={() => setHoveredRoom(r.label)}
             onMouseLeave={() => setHoveredRoom(null)}>
-            <circle cx={r.sx} cy={r.sy} r={isHovered ? 14 : 10} fill={isHovered ? "#1a2f4a" : (r.color === "green" ? "#90EE90" : r.hallway ? "#FFD700" : "#FFFFFF")} stroke={isHovered ? "#3b82f640" : "#1a254020"} strokeWidth={isHovered ? 1 : .5} />
-            <circle cx={r.sx} cy={r.sy} r="3.5" fill={isHovered ? "#3b82f6" : (r.color === "green" ? "#228B22" : r.hallway ? "#B8860B" : "#1e2a3a")} stroke="#2a3f5f30" strokeWidth=".5"/>
-            <text x={r.sx} y={r.sy-9} textAnchor="middle" fill={isHovered ? "#93c5fd" : (r.color === "green" ? "#006400" : r.hallway ? "#8B6914" : "#4a5a70")} fontSize="5.5" fontFamily="monospace" fontWeight={isHovered ? "bold" : "normal"}>{r.label}</text>
+            <circle cx={r.sx} cy={r.sy} r={isHovered ? 14 : 10} fill={isHovered ? "#1a2f4a" : (r.color === "green" || r.hallway ? "transparent" : "#FFFFFF")} stroke={isHovered ? "#3b82f640" : "#1a254020"} strokeWidth={isHovered ? 1 : .5} opacity={r.color === "green" || r.hallway ? 0 : 1} />
+            <circle cx={r.sx} cy={r.sy} r="3.5" fill={isHovered ? "#3b82f6" : (r.color === "green" || r.hallway ? "transparent" : "#1e2a3a")} stroke="#2a3f5f30" strokeWidth=".5" opacity={r.color === "green" || r.hallway ? 0 : 1} />
+            <text x={r.sx} y={r.sy-9} textAnchor="middle" fill={isHovered ? "#93c5fd" : (r.color === "green" || r.hallway ? "transparent" : "#4a5a70")} fontSize="5.5" fontFamily="monospace" fontWeight={isHovered ? "bold" : "normal"} opacity={r.color === "green" || r.hallway ? 0 : 1}>{r.label}</text>
           </g>
         );
       })}
@@ -2105,12 +2106,6 @@ const FloorPlan = ({ userPos, route, blockades, congestion, edgeCong, exitLoadDa
       </g>}
 
     {/* Debugging Label */}
-    {userPos && (
-    <text x="500" y="500" fill="yellow" fontSize="14" fontWeight="bold">
-        X: {userPos.x.toFixed(0)} Y: {userPos.y.toFixed(0)}
-    </text>
-    )}
-
       <text x="18" y="810" fill="#1a2a4050" fontSize="7" fontFamily="monospace">MC Building No.17 — 1st Floor — University of Waterloo — EchoAid GeoJSON</text>
     </svg>
   );
@@ -2263,8 +2258,12 @@ export default function App() {
     const a = brain.analytics();
     log(`🔄 ${rr.length} evacuees rerouted (3 convergence passes) · Balance: ${a.balanceScore}%`, "route");
     refreshBrain();
-    if (uNode && status === "EVACUATING") setTimeout(() => evac(uNode), 300);
-  }, [uNode, status, evac, log, refreshBrain]);
+    clients.forEach(c => {
+      if (c.status === "EVACUATING" && c.node) {
+        setTimeout(() => evac(c.node, c.id), 300);
+      }
+    });
+  }, [clients, evac, log, refreshBrain]);
 
   const doManualReroute = useCallback(() => {
     log("🔄 Manual reroute triggered...", "route");
@@ -2273,8 +2272,12 @@ export default function App() {
     const a = brain.analytics();
     log(`🔄 ${rr.length} evacuees rerouted (3 convergence passes) · Balance: ${a.balanceScore}%`, "route");
     refreshBrain();
-    if (uNode && status === "EVACUATING") setTimeout(() => evac(uNode), 300);
-  }, [uNode, status, evac, log, refreshBrain]);
+    clients.forEach(c => {
+      if (c.status === "EVACUATING" && c.node) {
+        setTimeout(() => evac(c.node, c.id), 300);
+      }
+    });
+  }, [clients, evac, log, refreshBrain]);
 
   const rmBlock = useCallback(edge => {
     brain.rmBlock(edge); setBlocks(brain.blocks());
@@ -2330,7 +2333,7 @@ export default function App() {
       if (client.status !== "EVACUATING" || !client.route || client.route.length < 2) return;
       intervals[client.id] = setInterval(() => {
         const newProgress = client.progress + 1;
-        if (newProgress >= client.route.length - 1) {
+        if (newProgress >= client.route.length) {
           clearInterval(intervals[client.id]);
           updateClient(client.id, { status: "SAFE", route: null });
           if (client.id === activeClientId) {
@@ -2411,7 +2414,7 @@ export default function App() {
 
       <div style={{ padding: "14px 20px", maxWidth: 1600, margin: "0 auto" }}>
         {/* MAP */}
-        <div className="map-shell" style={{ borderRadius: 12, padding: 12, marginBottom: 14 }}>
+        <div className="map-shell" style={{ borderRadius: 12, padding: 12, marginBottom: 14, maxWidth: "900px", maxHeight: "600px", margin: "0 auto 14px" }}>
           <FloorPlan 
             userPos={adminMode ? null : activeClient?.pos} 
             route={adminMode ? null : activeClient?.route} 
