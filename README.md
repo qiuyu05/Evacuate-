@@ -18,7 +18,7 @@
 
 ## 📖 Overview
 
-**EchoAid** is an intelligent disaster evacuation companion system designed for the **University of Waterloo Mathematics & Computer Building (MC Building, Floor 1)**. It uses AI-powered routing, real-time location tracking, and live coordination to guide people to safety during emergency evacuations.
+**EchoAid** is an intelligent disaster evacuation companion system currently designed for the **University of Waterloo Mathematics & Computer Building (MC Building, Floor 1)**. It uses AI-powered routing, real-time location tracking, and live coordination to guide people to safety during emergency evacuations.
 
 ### 🎯 Key Highlights
 
